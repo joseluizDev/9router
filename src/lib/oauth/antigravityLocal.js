@@ -26,6 +26,35 @@ export function getAdcCredentialPaths({ env = process.env, platform = process.pl
   return paths;
 }
 
+export function getDefaultAdcWritePath({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
+  if (env.GOOGLE_APPLICATION_CREDENTIALS?.trim()) {
+    return env.GOOGLE_APPLICATION_CREDENTIALS.trim();
+  }
+  return platform === "win32"
+    ? path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "gcloud", "application_default_credentials.json")
+    : path.join(home, ".config", "gcloud", "application_default_credentials.json");
+}
+
+export async function saveLocalAdcCredentials(credentials, { fsImpl = fs, targetPath = getDefaultAdcWritePath() } = {}) {
+  const dir = path.dirname(targetPath);
+  await fsImpl.mkdir(dir, { recursive: true });
+  await fsImpl.writeFile(targetPath, JSON.stringify(credentials, null, 2), "utf8");
+  return targetPath;
+}
+
+export async function removeLocalAdcCredentials({ fsImpl = fs, paths = getAdcCredentialPaths() } = {}) {
+  let removedAny = false;
+  for (const candidate of paths) {
+    try {
+      await fsImpl.unlink(candidate);
+      removedAny = true;
+    } catch {
+      // Ignore missing files
+    }
+  }
+  return removedAny;
+}
+
 function isAuthorizedUserCredentials(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     && value.type === "authorized_user"

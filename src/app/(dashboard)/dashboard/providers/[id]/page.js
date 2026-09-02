@@ -23,6 +23,7 @@ import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
+import AntigravityCliModal from "./AntigravityCliModal";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
 
@@ -74,6 +75,8 @@ export default function ProviderDetailPage() {
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
+  const [showAntigravityCliModal, setShowAntigravityCliModal] = useState(false);
+  const [antigravityCliStatus, setAntigravityCliStatus] = useState(null);
   const [importingLocalConfig, setImportingLocalConfig] = useState(false);
   const [localImportMessage, setLocalImportMessage] = useState(null);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
@@ -756,6 +759,45 @@ export default function ProviderDetailPage() {
     setShowOAuthModal(false);
   };
 
+  const fetchAntigravityCliStatus = useCallback(async () => {
+    if (providerId !== "antigravity") return;
+    try {
+      const res = await fetch("/api/oauth/antigravity/cli");
+      if (res.ok) {
+        const data = await res.json();
+        setAntigravityCliStatus(data);
+      }
+    } catch {
+      // ignore
+    }
+  }, [providerId]);
+
+  useEffect(() => {
+    if (providerId === "antigravity") {
+      fetchAntigravityCliStatus();
+    }
+  }, [providerId, fetchAntigravityCliStatus]);
+
+  const handleAntigravityCliLogout = async () => {
+    try {
+      setImportingLocalConfig(true);
+      const res = await fetch("/api/oauth/antigravity/cli", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "logout" }),
+      });
+      if (res.ok) {
+        await fetchAntigravityCliStatus();
+        await fetchConnections();
+        setLocalImportMessage({ type: "success", text: "Antigravity CLI deslogado com sucesso do servidor." });
+      }
+    } catch (err) {
+      setLocalImportMessage({ type: "error", text: err.message });
+    } finally {
+      setImportingLocalConfig(false);
+    }
+  };
+
   const handleLocalAntigravityImport = async () => {
     if (importingLocalConfig) return;
     setImportingLocalConfig(true);
@@ -769,6 +811,7 @@ export default function ProviderDetailPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to import local credentials");
       await fetchConnections();
+      await fetchAntigravityCliStatus();
       const accountEmail = data.connection?.email || data.connection?.name || "";
       setLocalImportMessage({
         type: "success",
@@ -1591,16 +1634,29 @@ export default function ProviderDetailPage() {
                       </Button>
                     )}
                     {providerId === "antigravity" && (
-                      <Button
-                        size="sm"
-                        icon="terminal"
-                        variant="secondary"
-                        onClick={handleLocalAntigravityImport}
-                        disabled={importingLocalConfig}
-                        title="Import credentials from Antigravity CLI or ADC on this machine"
-                      >
-                        {importingLocalConfig ? "Importing..." : "Import from Antigravity CLI"}
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          icon="terminal"
+                          variant="secondary"
+                          onClick={() => setShowAntigravityCliModal(true)}
+                          title="Fazer Login na CLI do Antigravity / Google ADC diretamente pelo site"
+                        >
+                          Login CLI
+                        </Button>
+                        {antigravityCliStatus?.installed && (
+                          <Button
+                            size="sm"
+                            icon="logout"
+                            variant="danger"
+                            onClick={handleAntigravityCliLogout}
+                            disabled={importingLocalConfig}
+                            title="Desconectar / Limpar credenciais CLI da máquina"
+                          >
+                            Deslogar CLI
+                          </Button>
+                        )}
+                      </div>
                     )}
                     <Button
                       size="sm"
@@ -1684,17 +1740,31 @@ export default function ProviderDetailPage() {
                     </Button>
                   )}
                   {providerId === "antigravity" && (
-                    <Button
-                      size="sm"
-                      icon="terminal"
-                      variant="secondary"
-                      onClick={handleLocalAntigravityImport}
-                      disabled={importingLocalConfig}
-                      title="Import credentials from Antigravity CLI or ADC on this machine"
-                      className="w-full sm:w-auto"
-                    >
-                      {importingLocalConfig ? "Importing..." : "Import from Antigravity CLI"}
-                    </Button>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <Button
+                        size="sm"
+                        icon="terminal"
+                        variant="secondary"
+                        onClick={() => setShowAntigravityCliModal(true)}
+                        title="Fazer Login na CLI do Antigravity / Google ADC diretamente pelo site"
+                        className="w-full sm:w-auto"
+                      >
+                        Login CLI
+                      </Button>
+                      {antigravityCliStatus?.installed && (
+                        <Button
+                          size="sm"
+                          icon="logout"
+                          variant="danger"
+                          onClick={handleAntigravityCliLogout}
+                          disabled={importingLocalConfig}
+                          title="Desconectar / Limpar credenciais CLI da máquina"
+                          className="w-full sm:w-auto"
+                        >
+                          Deslogar CLI
+                        </Button>
+                      )}
+                    </div>
                   )}
                   {hasDualAuthModes ? (
                     <>
@@ -1889,6 +1959,18 @@ export default function ProviderDetailPage() {
           isOpen={showBulkImportGrokCli}
           onClose={() => setShowBulkImportGrokCli(false)}
           onSuccess={fetchConnections}
+        />
+      )}
+
+      {providerId === "antigravity" && (
+        <AntigravityCliModal
+          isOpen={showAntigravityCliModal}
+          onClose={() => setShowAntigravityCliModal(false)}
+          onSuccess={async () => {
+            await fetchConnections();
+            await fetchAntigravityCliStatus();
+            setShowAntigravityCliModal(false);
+          }}
         />
       )}
 

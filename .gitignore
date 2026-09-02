@@ -27,6 +27,8 @@ product
 # misc
 .DS_Store
 *.pem
+*-backup.json
+*backup*.json
 
 # debug
 npm-debug.log*
