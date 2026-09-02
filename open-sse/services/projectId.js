@@ -227,18 +227,29 @@ async function onboardUser(accessToken, tierID, externalSignal, endpoints, provi
 
             if (!response.ok) {
                 const errorText = await response.text().catch(() => "");
+                // Non-retriable auth/permission/validation errors
+                if (response.status === 401 || response.status === 403 || response.status === 404) {
+                    console.warn(`[ProjectId] onboardUser HTTP ${response.status}: ${errorText.slice(0, 200)} (non-retriable)`);
+                    return null;
+                }
                 throw new Error(`onboardUser HTTP ${response.status}: ${errorText.slice(0, 200)}`);
             }
 
             const data = await response.json();
 
             if (data.done === true) {
+                if (data.error) {
+                    const errMsg = data.error.message || JSON.stringify(data.error);
+                    console.warn(`[ProjectId] onboardUser finished with error: ${errMsg}`);
+                    return null;
+                }
                 const projectId = extractProjectIdFromOnboard(data);
                 if (projectId) {
                     console.log(`[ProjectId] Successfully onboarded, project ID: ${projectId}`);
                     return projectId;
                 }
-                throw new Error("onboardUser done but no project_id in response");
+                console.warn("[ProjectId] onboardUser done but no project_id in response");
+                return null;
             }
 
             // Server not done yet – wait and retry

@@ -23,7 +23,6 @@ export default {
     format: "antigravity",
     headers: {
       "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
-      "x-request-source": "local",
       "x-client-version": "2.1.1",
       "x-goog-api-client": "antigravity/2.1.1",
     },

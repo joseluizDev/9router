@@ -74,6 +74,8 @@ export default function ProviderDetailPage() {
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
+  const [importingLocalConfig, setImportingLocalConfig] = useState(false);
+  const [localImportMessage, setLocalImportMessage] = useState(null);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
   const [oneByOneStopping, setOneByOneStopping] = useState(false);
   const [oneByOneCurrentConnectionId, setOneByOneCurrentConnectionId] = useState(null);
@@ -754,6 +756,27 @@ export default function ProviderDetailPage() {
     setShowOAuthModal(false);
   };
 
+  const handleLocalAntigravityImport = async () => {
+    if (importingLocalConfig) return;
+    setImportingLocalConfig(true);
+    setLocalImportMessage(null);
+    try {
+      const res = await fetch("/api/oauth/antigravity/local-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to import local credentials");
+      await fetchConnections();
+      setLocalImportMessage({ type: "success", text: "Local Antigravity credentials imported." });
+    } catch (error) {
+      setLocalImportMessage({ type: "error", text: error.message });
+    } finally {
+      setImportingLocalConfig(false);
+    }
+  };
+
   const handleIFlowCookieSuccess = () => {
     fetchConnections();
     setShowIFlowCookieModal(false);
@@ -993,6 +1016,9 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onDelete={() => handleDelete(conn.id)}
+                onUnlock={(updated) => {
+                  setConnections(prev => prev.map(c => c.id === conn.id ? { ...c, ...updated } : c));
+                }}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
@@ -1536,6 +1562,18 @@ export default function ProviderDetailPage() {
                         {translate("Bulk Add")}
                       </Button>
                     )}
+                    {providerId === "antigravity" && (
+                      <Button
+                        size="sm"
+                        icon="download"
+                        variant="secondary"
+                        onClick={handleLocalAntigravityImport}
+                        disabled={importingLocalConfig}
+                        title="Import Google ADC credentials from this machine"
+                      >
+                        {importingLocalConfig ? "Importing..." : "Import Local ADC"}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       icon="add"
@@ -1617,6 +1655,19 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
+                  {providerId === "antigravity" && (
+                    <Button
+                      size="sm"
+                      icon="download"
+                      variant="secondary"
+                      onClick={handleLocalAntigravityImport}
+                      disabled={importingLocalConfig}
+                      title="Import Google ADC credentials from this machine"
+                      className="w-full sm:w-auto"
+                    >
+                      {importingLocalConfig ? "Importing..." : "Import Local ADC"}
+                    </Button>
+                  )}
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1650,6 +1701,14 @@ export default function ProviderDetailPage() {
                 </div>
               )}
             </>
+          )}
+          {localImportMessage && (
+            <div className={`mt-3 flex items-start gap-2 rounded px-2 py-1.5 text-xs ${localImportMessage.type === "success" ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"}`}>
+              <span className="material-symbols-outlined text-[14px] mt-0.5">
+                {localImportMessage.type === "success" ? "check_circle" : "error"}
+              </span>
+              <span>{localImportMessage.text}</span>
+            </div>
           )}
         </Card>
       )}

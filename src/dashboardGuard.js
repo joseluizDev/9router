@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { getSettings, validateApiKey } from "@/lib/localDb";
-import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { getSettings, validateApiKey } from "@/lib/localDb";
+import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { NextResponse } from "next/server";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -44,6 +44,7 @@ const ALWAYS_PROTECTED = [
   "/api/version/update",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
+  "/api/oauth/antigravity/local-import",
 ];
 
 // Require auth, but allow through if requireLogin is disabled

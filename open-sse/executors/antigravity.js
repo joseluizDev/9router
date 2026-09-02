@@ -1,12 +1,12 @@
 import crypto from "crypto";
-import { BaseExecutor } from "./base.js";
-import { PROVIDERS } from "../config/providers.js";
-import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
-import { HTTP_STATUS } from "../config/runtimeConfig.js";
-import { resolveSessionId } from "../utils/sessionManager.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { cleanJSONSchemaForAntigravity } from "../translator/formats/gemini.js";
+import { AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_HEADERS, ANTIGRAVITY_PROMPT_REWRITES, OAUTH_ENDPOINTS } from "../config/appConstants.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { PROVIDERS } from "../config/providers.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
+import { cleanJSONSchemaForAntigravity } from "../translator/formats/gemini.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { resolveSessionId } from "../utils/sessionManager.js";
+import { BaseExecutor } from "./base.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -130,7 +130,6 @@ export class AntigravityExecutor extends BaseExecutor {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,
       "User-Agent": this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
-      "x-request-source": "local",
       "x-client-version": "2.1.1",
       "x-goog-api-client": "antigravity/2.1.1",
     };

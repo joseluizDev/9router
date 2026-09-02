@@ -6,10 +6,12 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip, Modal, Button } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, onUnlock = null, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockFeedback, setUnlockFeedback] = useState(null);
   const proxyDropdownRef = useRef(null);
 
   const proxyPoolMap = new Map((proxyPools || []).map((pool) => [pool.id, pool]));
@@ -114,8 +116,52 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
 
   // Determine effective status (override unavailable if cooldown expired)
   const effectiveStatus = (connection.testStatus === "unavailable" && !isCooldown)
-    ? "active"  // Cooldown expired u2192 treat as active
+    ? "active"  // Cooldown expired → treat as active
     : connection.testStatus;
+
+  // Extract Google validation challenge URL if present on connection or in error details
+  const effectiveValidationUrl = connection.validationUrl || (() => {
+    if (!connection.lastError && !connection.lastErrorDetail) return null;
+    const combined = `${connection.lastError || ""} ${connection.lastErrorDetail || ""}`;
+    const m = combined.match(/https:\/\/accounts\.google\.com\/signin\/continue[^\s"'}\]]+/);
+    return m ? m[0] : null;
+  })();
+
+  const isGoogleVerificationIssue =
+    !!effectiveValidationUrl ||
+    (connection.lastError &&
+      (/verify your account/i.test(connection.lastError) ||
+        /VALIDATION_REQUIRED/i.test(connection.lastError) ||
+        (/403/i.test(connection.lastError) && (connection.provider === "antigravity" || connection.provider === "gemini-cli"))));
+
+  const handleUnlock = async () => {
+    if (unlocking) return;
+    setUnlocking(true);
+    setUnlockFeedback(null);
+    try {
+      const res = await fetch(`/api/providers/${connection.id}/unlock`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsCooldown(false);
+        setUnlockFeedback({ type: "success", text: "Conta liberada!" });
+        if (onUnlock) {
+          onUnlock(data.connection);
+        }
+        setTimeout(() => setUnlockFeedback(null), 3500);
+      } else {
+        setUnlockFeedback({ type: "error", text: data.error || "Erro ao liberar." });
+        setTimeout(() => setUnlockFeedback(null), 4000);
+      }
+    } catch (err) {
+      console.error("Failed to unlock connection:", err);
+      setUnlockFeedback({ type: "error", text: err.message || "Erro de rede." });
+      setTimeout(() => setUnlockFeedback(null), 4000);
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   const getStatusVariant = () => getConnectionStatusVariant(connection.isActive, effectiveStatus);
 
@@ -177,17 +223,31 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </Badge>
             )}
             {isCooldown && connection.isActive !== false && <CooldownTimer until={modelLockUntil} />}
-            {connection.lastError && connection.isActive !== false && (/verify your account/i.test(connection.lastError) || /403/i.test(connection.lastError) || /PERMISSION_DENIED/i.test(connection.lastError)) && (
+            {isGoogleVerificationIssue && connection.isActive !== false && (
               <a
-                href="https://myaccount.google.com/security-checkup"
+                href={effectiveValidationUrl || "https://myaccount.google.com/security-checkup"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600 transition-colors hover:bg-amber-500/25 dark:text-amber-400"
-                title="Google bloqueou por segurança. Clique aqui para abrir a verificação de segurança da sua conta Google e liberar o acesso."
+                title={effectiveValidationUrl ? "Abrir link oficial de liberação gerado pelo Google" : "Abrir verificação de segurança da sua conta Google"}
               >
-                <span className="material-symbols-outlined text-[14px]">lock_open</span>
-                Liberar Conta Google
+                <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                {effectiveValidationUrl ? "Acessar Link de Liberação" : "Liberar Conta Google"}
               </a>
+            )}
+            {(isCooldown || connection.lastError || connection.testStatus === "unavailable") && connection.isActive !== false && (
+              <button
+                type="button"
+                onClick={handleUnlock}
+                disabled={unlocking}
+                className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-600 transition-colors hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-400"
+                title="Limpar bloqueios e cooldown desta conta imediatamente"
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {unlocking ? "progress_activity" : "lock_open"}
+                </span>
+                {unlocking ? "Liberando..." : "Liberar Conta"}
+              </button>
             )}
             {connection.lastError && connection.isActive !== false && (
               <button
@@ -198,6 +258,11 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               >
                 {connection.lastError}
               </button>
+            )}
+            {unlockFeedback && (
+              <span className={`text-xs font-medium ${unlockFeedback.type === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                {unlockFeedback.text}
+              </span>
             )}
             <span className="text-xs text-text-muted">#{connection.priority}</span>
             {connection.globalPriority && (
@@ -275,6 +340,19 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </button>
             </Tooltip>
           )}
+          {(isCooldown || connection.lastError || connection.testStatus === "unavailable") && (
+            <button
+              onClick={handleUnlock}
+              disabled={unlocking}
+              className="flex flex-col items-center rounded px-2 py-1 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
+              title="Liberar / Desbloquear Conta (Limpa cooldown e erros)"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {unlocking ? "progress_activity" : "lock_open"}
+              </span>
+              <span className="text-[10px] leading-tight">Liberar</span>
+            </button>
+          )}
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
@@ -300,14 +378,49 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
           size="lg"
         >
           <div className="space-y-4">
-            {connection.lastError && (/verify your account/i.test(connection.lastError) || /403/i.test(connection.lastError) || /PERMISSION_DENIED/i.test(connection.lastError)) && (
+            {effectiveValidationUrl && (
+              <div className="rounded-lg border border-primary/40 bg-primary/10 p-4 shadow-sm">
+                <div className="flex items-center gap-2 font-semibold text-primary">
+                  <span className="material-symbols-outlined">verified_user</span>
+                  <span>Link Oficial de Desbloqueio Gerado pelo Google</span>
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-text-muted">
+                  O Google gerou este link exclusivo com o token da sua sessão para validar a conta ({displayName}). Abra no navegador logado com a conta para confirmar a liberação:
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <a
+                    href={effectiveValidationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-primary-hover"
+                  >
+                    <span className="material-symbols-outlined text-sm">open_in_new</span>
+                    Acessar Link de Liberação Google
+                  </a>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={unlocking ? "progress_activity" : "lock_open"}
+                    onClick={async () => {
+                      await handleUnlock();
+                      setShowErrorModal(false);
+                    }}
+                    disabled={unlocking}
+                  >
+                    {unlocking ? "Liberando..." : "Liberar Conta no 9Router"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {isGoogleVerificationIssue && !effectiveValidationUrl && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
                 <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
                   <span className="material-symbols-outlined">security</span>
                   <span>Google Bloqueou por Verificação de Segurança (403)</span>
                 </div>
                 <p className="mt-1.5 text-xs leading-relaxed text-text-muted">
-                  O Google detectou a chamada de API/OAuth originada de um IP de servidor ou proxy (ex: Vercel/Datacenter) e pausou a conta até que você confirme a atividade recente. Acesse os links abaixo logado com <strong className="text-text-main">{connection.email || "sua conta Google"}</strong> para liberar:
+                  O Google pausou as chamadas desta conta até que você confirme a atividade recente. Acesse os links abaixo logado com <strong className="text-text-main">{connection.email || "sua conta Google"}</strong> para liberar:
                 </p>
                 <div className="mt-3 flex flex-col sm:flex-row flex-wrap gap-2">
                   <a
@@ -353,11 +466,24 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             <div>
               <label className="text-xs font-semibold text-text-muted">Mensagem Completa do Erro:</label>
               <pre className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-black/5 p-3 font-mono text-xs text-red-500 dark:bg-white/5">
-                {connection.lastError || "Nenhum detalhe de erro disponível."}
+                {connection.lastErrorDetail || connection.lastError || "Nenhum detalhe de erro disponível."}
               </pre>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-between items-center gap-2 pt-2 border-t border-border">
+              {(isCooldown || connection.lastError || connection.testStatus === "unavailable") && (
+                <Button
+                  variant="primary"
+                  icon={unlocking ? "progress_activity" : "lock_open"}
+                  onClick={async () => {
+                    await handleUnlock();
+                    setShowErrorModal(false);
+                  }}
+                  disabled={unlocking}
+                >
+                  {unlocking ? "Liberando..." : "Liberar Conta Agora"}
+                </Button>
+              )}
               <Button variant="secondary" onClick={() => setShowErrorModal(false)}>
                 Fechar
               </Button>
@@ -398,6 +524,7 @@ ConnectionRow.propTypes = {
   onUpdateProxy: PropTypes.func,
   onEdit: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
+  onUnlock: PropTypes.func,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,
     error: PropTypes.string,

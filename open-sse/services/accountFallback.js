@@ -213,3 +213,87 @@ export function applyErrorState(account, status, errorText) {
     status: "error"
   };
 }
+
+/**
+ * Extract Google validation challenge information (e.g. VALIDATION_REQUIRED)
+ * from an error payload (JSON object, stringified JSON, or raw text).
+ *
+ * @param {string|object} errorText
+ * @returns {{ isValidationRequired: boolean, message: string|null, validationUrl: string|null }}
+ */
+export function extractGoogleValidationInfo(errorText) {
+  if (!errorText) return { isValidationRequired: false, message: null, validationUrl: null };
+
+  let text = typeof errorText === "string" ? errorText : "";
+  let parsed = null;
+
+  if (typeof errorText === "object" && errorText !== null) {
+    parsed = errorText;
+    try {
+      text = JSON.stringify(errorText);
+    } catch {}
+  } else if (typeof errorText === "string") {
+    try {
+      parsed = JSON.parse(errorText);
+    } catch {
+      // Not pure JSON, could be prefixed or raw text
+    }
+  }
+
+  let validationUrl = null;
+  let message = null;
+  let isValidationRequired = false;
+
+  if (parsed) {
+    const err = parsed.error || parsed;
+    if (err.message && typeof err.message === "string") {
+      message = err.message;
+    }
+    const details = Array.isArray(err.details) ? err.details : [];
+    for (const d of details) {
+      if (
+        d.reason === "VALIDATION_REQUIRED" ||
+        (typeof d["@type"] === "string" && d["@type"].includes("ErrorInfo") && d.reason === "VALIDATION_REQUIRED")
+      ) {
+        isValidationRequired = true;
+      }
+      if (d.metadata && typeof d.metadata === "object") {
+        if (d.metadata.validation_url) {
+          validationUrl = d.metadata.validation_url;
+          isValidationRequired = true;
+        }
+        if (d.metadata.validation_error_message && !message) {
+          message = d.metadata.validation_error_message;
+        }
+      }
+      if (Array.isArray(d.links)) {
+        for (const link of d.links) {
+          if (link.url && (/verify/i.test(link.description || "") || link.url.includes("accounts.google.com/signin/continue"))) {
+            validationUrl = validationUrl || link.url;
+            isValidationRequired = true;
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback regex scan for the Google signin/continue URL
+  if (!validationUrl && text) {
+    const urlMatch = text.match(/https:\/\/accounts\.google\.com\/signin\/continue[^\s"'}\]]+/);
+    if (urlMatch) {
+      validationUrl = urlMatch[0];
+      isValidationRequired = true;
+    }
+  }
+
+  if (!isValidationRequired && text && (/verify your account/i.test(text) || /VALIDATION_REQUIRED/i.test(text))) {
+    isValidationRequired = true;
+  }
+
+  if (isValidationRequired && !message) {
+    message = "Verify your account to continue.";
+  }
+
+  return { isValidationRequired, message, validationUrl };
+}
+
