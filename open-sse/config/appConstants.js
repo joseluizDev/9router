@@ -174,7 +174,11 @@ export const CLAUDE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official C
 // Rewrite rules applied to Antigravity system prompts: competing-client branding
 // makes the backend flag the request and answer 429 Quota Exhausted.
 export const ANTIGRAVITY_PROMPT_REWRITES = [
-  { from: "You are a Claude agent, built on Anthropic's Claude Agent SDK.", to: "" },
+  { from: /You are a Claude agent, built on Anthropic's Claude Agent SDK\./gi, to: "" },
+  { from: /You are Claude Code, Anthropic's official CLI for Claude\./gi, to: "You are Antigravity, Google's agentic AI coding assistant." },
+  { from: /You are Cursor(?:\s*Agent)?/gi, to: "You are Antigravity" },
+  { from: /You are Cline/gi, to: "You are Antigravity" },
+  { from: /You are Roo(?:\s*Code)?/gi, to: "You are Antigravity" },
   { from: /opencode/gi, to: (m) => (m === "OpenCode" ? "Antigravity" : m === "OPENCODE" ? "ANTIGRAVITY" : "antigravity") }
 ];
 

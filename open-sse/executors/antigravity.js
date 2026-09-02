@@ -130,6 +130,9 @@ export class AntigravityExecutor extends BaseExecutor {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,
       "User-Agent": this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
+      "x-request-source": "local",
+      "x-client-version": "2.1.1",
+      "x-goog-api-client": "antigravity/2.1.1",
     };
   }
 
