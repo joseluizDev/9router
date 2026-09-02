@@ -1,5 +1,6 @@
 import { PROVIDERS, PROVIDER_OAUTH } from "../../config/providers.js";
 import { OAUTH_ENDPOINTS, GITHUB_COPILOT, buildKimiHeaders } from "../../config/appConstants.js";
+import { ANTIGRAVITY_IDE_USER_AGENT } from "../../providers/shared.js";
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { dedupRefresh } from "./dedup.js";
 import { buildExternalIdpRefreshParams } from "../../../src/lib/oauth/kiroExternalIdp.js";
@@ -208,6 +209,7 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
+        "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",

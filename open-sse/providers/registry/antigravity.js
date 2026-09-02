@@ -13,8 +13,8 @@ export default {
     notice: {
       signupUrl: "https://antigravity.google",
     },
-    deprecated: true,
-    deprecationNotice: "RISK_NOTICE",
+    deprecated: false,
+    deprecationNotice: null,
   },
   category: "oauth",
   serviceKinds: ["llm", "image", "webSearch"],

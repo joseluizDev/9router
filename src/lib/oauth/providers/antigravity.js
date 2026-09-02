@@ -51,6 +51,7 @@ const antigravity = {
     const userInfoRes = await fetch(`${ANTIGRAVITY_CONFIG.userInfoUrl}?alt=json`, {
       headers: {
         Authorization: `Bearer ${tokens.access_token}`,
+        "User-Agent": ANTIGRAVITY_CONFIG.loadCodeAssistUserAgent,
         "x-request-source": "local",
       },
     });
