@@ -769,7 +769,13 @@ export default function ProviderDetailPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to import local credentials");
       await fetchConnections();
-      setLocalImportMessage({ type: "success", text: "Local Antigravity credentials imported." });
+      const accountEmail = data.connection?.email || data.connection?.name || "";
+      setLocalImportMessage({
+        type: "success",
+        text: accountEmail
+          ? `Antigravity CLI account imported: ${accountEmail}`
+          : "Antigravity CLI credentials imported successfully."
+      });
     } catch (error) {
       setLocalImportMessage({ type: "error", text: error.message });
     } finally {
@@ -1520,6 +1526,28 @@ export default function ProviderDetailPage() {
             </div>
           </div>
 
+          {localImportMessage && (
+            <div className={`mb-4 rounded-lg border px-3 py-2 text-xs flex items-center justify-between ${
+              localImportMessage.type === "error"
+                ? "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400"
+                : "border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400"
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px]">
+                  {localImportMessage.type === "error" ? "error" : "check_circle"}
+                </span>
+                <span>{localImportMessage.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocalImportMessage(null)}
+                className="hover:opacity-70 text-text-muted"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            </div>
+          )}
+
           {connections.length === 0 ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
@@ -1565,13 +1593,13 @@ export default function ProviderDetailPage() {
                     {providerId === "antigravity" && (
                       <Button
                         size="sm"
-                        icon="download"
+                        icon="terminal"
                         variant="secondary"
                         onClick={handleLocalAntigravityImport}
                         disabled={importingLocalConfig}
-                        title="Import Google ADC credentials from this machine"
+                        title="Import credentials from Antigravity CLI or ADC on this machine"
                       >
-                        {importingLocalConfig ? "Importing..." : "Import Local ADC"}
+                        {importingLocalConfig ? "Importing..." : "Import from Antigravity CLI"}
                       </Button>
                     )}
                     <Button
@@ -1658,14 +1686,14 @@ export default function ProviderDetailPage() {
                   {providerId === "antigravity" && (
                     <Button
                       size="sm"
-                      icon="download"
+                      icon="terminal"
                       variant="secondary"
                       onClick={handleLocalAntigravityImport}
                       disabled={importingLocalConfig}
-                      title="Import Google ADC credentials from this machine"
+                      title="Import credentials from Antigravity CLI or ADC on this machine"
                       className="w-full sm:w-auto"
                     >
-                      {importingLocalConfig ? "Importing..." : "Import Local ADC"}
+                      {importingLocalConfig ? "Importing..." : "Import from Antigravity CLI"}
                     </Button>
                   )}
                   {hasDualAuthModes ? (
