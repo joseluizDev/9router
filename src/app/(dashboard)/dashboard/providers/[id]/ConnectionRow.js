@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
-import { Badge, Toggle, Tooltip } from "@/shared/components";
+import { Badge, Toggle, Tooltip, Modal, Button } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
   const proxyDropdownRef = useRef(null);
 
   const proxyPoolMap = new Map((proxyPools || []).map((pool) => [pool.id, pool]));
@@ -176,10 +177,27 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </Badge>
             )}
             {isCooldown && connection.isActive !== false && <CooldownTimer until={modelLockUntil} />}
+            {connection.lastError && connection.isActive !== false && (/verify your account/i.test(connection.lastError) || /403/i.test(connection.lastError) || /PERMISSION_DENIED/i.test(connection.lastError)) && (
+              <a
+                href="https://myaccount.google.com/security-checkup"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600 transition-colors hover:bg-amber-500/25 dark:text-amber-400"
+                title="Google bloqueou por segurança. Clique aqui para abrir a verificação de segurança da sua conta Google e liberar o acesso."
+              >
+                <span className="material-symbols-outlined text-[14px]">lock_open</span>
+                Liberar Conta Google
+              </a>
+            )}
             {connection.lastError && connection.isActive !== false && (
-              <span className="max-w-full truncate text-xs text-red-500 sm:max-w-[300px]" title={connection.lastError}>
+              <button
+                type="button"
+                onClick={() => setShowErrorModal(true)}
+                className="max-w-full truncate text-left text-xs text-red-500 underline decoration-red-500/40 underline-offset-2 hover:text-red-600 dark:hover:text-red-400 sm:max-w-[300px]"
+                title="Clique para ver os detalhes completos e links de desbloqueio"
+              >
                 {connection.lastError}
-              </span>
+              </button>
             )}
             <span className="text-xs text-text-muted">#{connection.priority}</span>
             {connection.globalPriority && (
@@ -273,6 +291,80 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
           title={(connection.isActive ?? true) ? "Disable connection" : "Enable connection"}
         />
       </div>
+
+      {showErrorModal && (
+        <Modal
+          isOpen={showErrorModal}
+          onClose={() => setShowErrorModal(false)}
+          title={`Detalhes do Erro (${displayName})`}
+          size="lg"
+        >
+          <div className="space-y-4">
+            {connection.lastError && (/verify your account/i.test(connection.lastError) || /403/i.test(connection.lastError) || /PERMISSION_DENIED/i.test(connection.lastError)) && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
+                  <span className="material-symbols-outlined">security</span>
+                  <span>Google Bloqueou por Verificação de Segurança (403)</span>
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-text-muted">
+                  O Google detectou a chamada de API/OAuth originada de um IP de servidor ou proxy (ex: Vercel/Datacenter) e pausou a conta até que você confirme a atividade recente. Acesse os links abaixo logado com <strong className="text-text-main">{connection.email || "sua conta Google"}</strong> para liberar:
+                </p>
+                <div className="mt-3 flex flex-col sm:flex-row flex-wrap gap-2">
+                  <a
+                    href="https://myaccount.google.com/security-checkup"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-primary-hover"
+                  >
+                    <span className="material-symbols-outlined text-sm">open_in_new</span>
+                    1. Liberar no Google Security Checkup
+                  </a>
+                  <a
+                    href="https://myaccount.google.com/notifications"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-2 text-xs font-medium text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <span className="material-symbols-outlined text-sm">notifications</span>
+                    2. Ver Alertas de Notificação Google
+                  </a>
+                  <a
+                    href="https://console.cloud.google.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-2 text-xs font-medium text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <span className="material-symbols-outlined text-sm">cloud</span>
+                    3. Aceitar Termos no Cloud Console
+                  </a>
+                  <a
+                    href="https://accounts.google.com/b/0/DisplayUnlockCaptcha"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-2 text-xs font-medium text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <span className="material-symbols-outlined text-sm">key</span>
+                    4. Desbloquear Captcha Google
+                  </a>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-semibold text-text-muted">Mensagem Completa do Erro:</label>
+              <pre className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-black/5 p-3 font-mono text-xs text-red-500 dark:bg-white/5">
+                {connection.lastError || "Nenhum detalhe de erro disponível."}
+              </pre>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <Button variant="secondary" onClick={() => setShowErrorModal(false)}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
