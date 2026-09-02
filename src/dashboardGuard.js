@@ -209,9 +209,9 @@ export async function proxy(request) {
     }
   }
 
-  // Always protected - require valid JWT or local CLI token (machineId-based)
+  // Always protected - require valid JWT, local CLI token (machineId-based), or authenticated session
   if (ALWAYS_PROTECTED.some((p) => pathname.startsWith(p))) {
-    if (await hasValidCliToken(request) || await hasValidToken(request))
+    if (await hasValidCliToken(request) || await hasValidToken(request) || await isAuthenticated(request))
       return NextResponse.next();
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
