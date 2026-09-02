@@ -59,6 +59,7 @@ describe("POST /api/oauth/antigravity/local-import", () => {
     }));
 
     expect(response.status).toBe(404);
+    expect(response.body.error).toContain("Antigravity CLI");
     expect(response.body.error).toContain("ADC");
     expect(response.body.error).not.toContain("refresh");
   });

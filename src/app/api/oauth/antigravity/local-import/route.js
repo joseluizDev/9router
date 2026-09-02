@@ -5,7 +5,7 @@ import {
 import { createProviderConnection } from "@/models";
 import { NextResponse } from "next/server";
 
-const NO_LOCAL_CREDENTIALS_MESSAGE = "No supported local ADC credentials found. Configure Google ADC or use OAuth login.";
+const NO_LOCAL_CREDENTIALS_MESSAGE = "No Antigravity CLI or Google ADC credentials found on this machine. Run 'agy auth login' in your terminal or use 'Add Connection' for web login.";
 
 export async function POST() {
   try {
