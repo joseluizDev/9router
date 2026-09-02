@@ -77,4 +77,41 @@ describe("Antigravity local credentials", () => {
     postExchange.mockRestore();
     mapTokens.mockRestore();
   });
+
+  it("imports Antigravity credentials from native system keyring when ADC is not present", async () => {
+    const postExchange = vi.spyOn(antigravity, "postExchange").mockResolvedValue({
+      userInfo: { email: "keyring@example.com" },
+      projectId: "keyring-proj",
+    });
+    const mapTokens = vi.spyOn(antigravity, "mapTokens").mockImplementation((tokens, extra) => ({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresIn: tokens.expires_in,
+      email: extra.userInfo.email,
+      projectId: extra.projectId,
+    }));
+
+    const execImpl = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        token: { refresh_token: "keyring-refresh-token", access_token: "keyring-access-token" }
+      })
+    }));
+    const fsImpl = { readFile: vi.fn(async () => { throw new Error("ENOENT"); }) };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ access_token: "refreshed-access", refresh_token: "rotated-keyring-refresh", expires_in: 3600 }),
+    }));
+
+    await expect(importLocalAntigravity({ fsImpl, fetchImpl, execImpl, platform: "win32" })).resolves.toEqual({
+      accessToken: "refreshed-access",
+      refreshToken: "rotated-keyring-refresh",
+      expiresIn: 3600,
+      email: "keyring@example.com",
+      projectId: "keyring-proj",
+    });
+
+    expect(execImpl).toHaveBeenCalled();
+    postExchange.mockRestore();
+    mapTokens.mockRestore();
+  });
 });

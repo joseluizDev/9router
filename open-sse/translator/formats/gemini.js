@@ -308,6 +308,13 @@ function ensureObjectType(obj) {
   for (const v of Object.values(obj)) if (v && typeof v === "object") ensureObjectType(v);
 }
 
+// Infer missing type=array when items exist (Gemini requires explicit type)
+function ensureArrayType(obj) {
+  if (!obj || typeof obj !== "object") return;
+  if (obj.items && !obj.type) obj.type = "array";
+  for (const v of Object.values(obj)) if (v && typeof v === "object") ensureArrayType(v);
+}
+
 // Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
 export function cleanJSONSchemaForAntigravity(schema) {
   if (!schema || typeof schema !== "object") return schema;
@@ -324,8 +331,9 @@ export function cleanJSONSchemaForAntigravity(schema) {
   flattenAnyOfOneOf(cleaned);
   flattenTypeArrays(cleaned);
 
-  // Phase 2.5: Infer missing type=object when properties exist (Gemini requirement)
+  // Phase 2.5: Infer missing type=object / type=array when properties/items exist (Gemini requirement)
   ensureObjectType(cleaned);
+  ensureArrayType(cleaned);
 
   // Phase 3: Remove all unsupported keywords at ALL levels (including inside arrays)
   removeUnsupportedKeywords(cleaned, UNSUPPORTED_SCHEMA_CONSTRAINTS);
@@ -355,7 +363,7 @@ export function cleanJSONSchemaForAntigravity(schema) {
 
   cleanupRequired(cleaned);
 
-  // Phase 5: Add placeholder for empty object schemas (Antigravity requirement)
+  // Phase 5: Add placeholder for empty object schemas and ensure array schemas have items (Gemini/Antigravity requirement)
   function addPlaceholders(obj) {
     if (!obj || typeof obj !== "object") return;
 
@@ -381,6 +389,18 @@ export function cleanJSONSchemaForAntigravity(schema) {
           }
         };
         obj.required = ["reason"];
+      }
+    }
+
+    if (obj.type === "array") {
+      if (Array.isArray(obj.items)) {
+        obj.items = (obj.items[0] && typeof obj.items[0] === "object")
+          ? obj.items[0]
+          : { type: "string" };
+      } else if (!obj.items || typeof obj.items !== "object" || Object.keys(obj.items).length === 0) {
+        obj.items = { type: "string" };
+      } else if (!obj.items.type && !obj.items.properties && !obj.items.items) {
+        obj.items.type = "string";
       }
     }
 
