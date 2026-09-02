@@ -4,6 +4,7 @@ import {
   exchangeAdcRefreshToken,
   getAdcCredentialPaths,
   importLocalAntigravity,
+  readKeyringCredentials,
   readLocalAdcCredentials,
 } from "../../src/lib/oauth/antigravityLocal.js";
 import antigravity from "../../src/lib/oauth/providers/antigravity.js";
@@ -113,5 +114,17 @@ describe("Antigravity local credentials", () => {
     expect(execImpl).toHaveBeenCalled();
     postExchange.mockRestore();
     mapTokens.mockRestore();
+  });
+
+  it("handles empty or malformed keyring output gracefully", async () => {
+    const execImpl = vi.fn(async () => ({ stdout: "   " }));
+    const creds = await readKeyringCredentials({ execImpl, platform: "win32" });
+    expect(creds).toBeNull();
+  });
+
+  it("handles keyring command failure gracefully without throwing", async () => {
+    const execImpl = vi.fn(async () => { throw new Error("Key not found"); });
+    const creds = await readKeyringCredentials({ execImpl, platform: "win32" });
+    expect(creds).toBeNull();
   });
 });
