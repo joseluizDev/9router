@@ -116,7 +116,10 @@ export class AntigravityExecutor extends BaseExecutor {
 
   buildUrl(model, stream, urlIndex = 0) {
     const baseUrls = this.getBaseUrls();
-    const baseUrl = baseUrls[urlIndex] || baseUrls[0];
+    let baseUrl = baseUrls[urlIndex] || baseUrls[0];
+    if (model && model.includes("gemini-3.8") && baseUrl.includes("daily-cloudcode-pa")) {
+      baseUrl = "https://cloudcode-pa.googleapis.com";
+    }
     // Image generation MUST use non-streaming generateContent
     const forceNonStream = isImageModel(model);
     const action = (stream && !forceNonStream) ? "streamGenerateContent?alt=sse" : "generateContent";
