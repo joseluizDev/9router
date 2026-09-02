@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
+import { MODEL_PRICING } from "../../open-sse/providers/pricing.js";
 import antigravityRegistry from "../../open-sse/providers/registry/antigravity.js";
 import geminiRegistry from "../../open-sse/providers/registry/gemini.js";
-import { MODEL_PRICING } from "../../open-sse/providers/pricing.js";
-import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
 
 describe("Gemini 3.8 Flash Support & Config", () => {
   it("registers gemini-3.8-flash tiered models in antigravity provider registry", () => {
@@ -35,9 +35,9 @@ describe("Gemini 3.8 Flash Support & Config", () => {
     expect(MODEL_PRICING["gemini-3.8-flash-low"]).toEqual(MODEL_PRICING["gemini-3.7-flash-low"]);
   });
 
-  it("buildUrl routes gemini-3.8 to production cloudcode-pa endpoint", () => {
+  it("buildUrl routes gemini-3.8 to daily-cloudcode-pa streaming endpoint", () => {
     const executor = new AntigravityExecutor();
     const url = executor.buildUrl("gemini-3.8-flash-tiered", true);
-    expect(url).toContain("https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent");
+    expect(url).toBe("https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse");
   });
 });
