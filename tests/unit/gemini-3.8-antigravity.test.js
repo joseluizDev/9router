@@ -12,6 +12,13 @@ describe("Gemini 3.8 Flash Support & Config", () => {
     expect(agIds).toContain("gemini-3.8-flash-medium");
     expect(agIds).toContain("gemini-3.8-flash-low");
     expect(agIds).not.toContain("gemini-3.8-flash");
+
+    const highModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-high");
+    expect(highModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(high)");
+    const medModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-medium");
+    expect(medModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(medium)");
+    const lowModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-low");
+    expect(lowModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(low)");
   });
 
   it("registers gemini-3.8-flash in gemini provider registry", () => {
