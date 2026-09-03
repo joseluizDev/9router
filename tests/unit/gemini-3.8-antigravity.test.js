@@ -11,14 +11,14 @@ describe("Gemini 3.8 Flash Support & Config", () => {
     expect(agIds).toContain("gemini-3.8-flash-high");
     expect(agIds).toContain("gemini-3.8-flash-medium");
     expect(agIds).toContain("gemini-3.8-flash-low");
-    expect(agIds).not.toContain("gemini-3.8-flash");
+    expect(agIds).toContain("gemini-3.8-flash");
 
     const highModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-high");
-    expect(highModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(high)");
+    expect(highModel.upstreamModelId).toBe("gemini-3.8-flash-high(high)");
     const medModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-medium");
-    expect(medModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(medium)");
+    expect(medModel.upstreamModelId).toBe("gemini-3.8-flash-medium(medium)");
     const lowModel = antigravityRegistry.models.find(m => m.id === "gemini-3.8-flash-low");
-    expect(lowModel.upstreamModelId).toBe("gemini-3.7-flash-tiered(low)");
+    expect(lowModel.upstreamModelId).toBe("gemini-3.8-flash-low(low)");
   });
 
   it("registers gemini-3.8-flash in gemini provider registry", () => {
@@ -41,7 +41,6 @@ describe("Gemini 3.8 Flash Support & Config", () => {
     expect(MODEL_PRICING["gemini-3.8-flash-medium"]).toEqual(MODEL_PRICING["gemini-3.7-flash-medium"]);
     expect(MODEL_PRICING["gemini-3.8-flash-low"]).toEqual(MODEL_PRICING["gemini-3.7-flash-low"]);
   });
-
   it("buildUrl routes gemini-3.8 to daily-cloudcode-pa streaming endpoint", () => {
     const executor = new AntigravityExecutor();
     const url = executor.buildUrl("gemini-3.8-flash-tiered", true);
