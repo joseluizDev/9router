@@ -1,13 +1,13 @@
 import crypto from "crypto";
-import { AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_HEADERS, ANTIGRAVITY_PROMPT_REWRITES, OAUTH_ENDPOINTS } from "../config/appConstants.js";
-import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
-import { PROVIDERS } from "../config/providers.js";
-import { HTTP_STATUS } from "../config/runtimeConfig.js";
-import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
-import { cleanJSONSchemaForAntigravity } from "../translator/formats/gemini.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
 import { BaseExecutor } from "./base.js";
+import { PROVIDERS } from "../config/providers.js";
+import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
+import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -195,7 +195,7 @@ export class AntigravityExecutor extends BaseExecutor {
 
     // ─── Standard (non-image) request ───
     // Fix contents for Claude models via Antigravity
-    const contents = body.request?.contents?.map(c => {
+    const rawContents = (body.request?.contents || []).map(c => {
       let role = c.role;
       // functionResponse must be role "user" for Claude models
       if (c.parts?.some(p => p.functionResponse)) {
@@ -228,15 +228,13 @@ export class AntigravityExecutor extends BaseExecutor {
         return p;
       });
 
-      const partsChanged = parts?.length !== c.parts?.length || modifiedParts?.some((p, idx) => p !== c.parts[idx]);
-      if (role !== c.role || partsChanged) {
-        return {
-          ...c, role,
-          parts: modifiedParts || parts,
-        };
-      }
-      return c;
+      return {
+        ...c,
+        role,
+        parts: modifiedParts || parts || [],
+      };
     });
+    const contents = normalizeGeminiContents(rawContents);
 
     // Sanitize tool schemas and function names before sending to Antigravity.
     let tools = body.request?.tools;
