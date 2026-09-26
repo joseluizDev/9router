@@ -182,7 +182,7 @@ export const ANTIGRAVITY_PROMPT_REWRITES = [
   { from: /You are Cursor(?:\s*Agent)?/gi, to: "You are Antigravity" },
   { from: /You are Cline/gi, to: "You are Antigravity" },
   { from: /You are Roo(?:\s*Code)?/gi, to: "You are Antigravity" },
-  { from: /You are Hermes Agent,\s*(an intelligent AI assistant)(?: created by Nous Research)?\./gi, to: "You are Hermes Agent. You are $1." },
+  { from: /You are Hermes(?: Agent)?(?:,\s*(?:an intelligent AI assistant|an AI assistant|an AI agent))?(?:,?\s*(?:built|created)\s+by\s+Nous Research)?\./gi, to: "You are an AI assistant." },
   // Claude Code prepends this line to its system prompt. The Claude-format translator strips it,
   // but OpenAI-format clients (e.g. proxies that convert Claude Code to /v1/chat/completions)
   // pass it through, and any system text containing it gets a fake 429 RESOURCE_EXHAUSTED.
