@@ -88,4 +88,43 @@ describe("passthrough stream fast-path", () => {
     expect(output).toContain('Line 1\\nLine 2 \\"quoted\\" 🚀');
     expect(completedContent).toBe('Line 1\nLine 2 "quoted" 🚀');
   });
+
+  it("processes Claude format pure text deltas and preserves content accumulation", async () => {
+    let completedContent = null;
+    let completedUsage = null;
+
+    const stream = createPassthroughStreamWithLogger(
+      "claude",
+      null,
+      "claude-3-5-sonnet",
+      "conn-1",
+      { model: "claude-3-5-sonnet", messages: [{ role: "user", content: "hi" }] },
+      (accumulated, usage) => {
+        completedContent = accumulated.content;
+        completedUsage = usage;
+      }
+    );
+
+    const inputChunks = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet","usage":{"input_tokens":10,"output_tokens":1}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" from Claude!"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    ];
+
+    const output = await readStream(stream, inputChunks);
+
+    expect(output).toContain('"text":"Hello"');
+    expect(output).toContain('"text":" from Claude!"');
+    expect(output).toContain('event: message_stop');
+
+    expect(completedContent).toBe("Hello from Claude!");
+    expect(completedUsage).toEqual(expect.objectContaining({
+      prompt_tokens: 10,
+      completion_tokens: 5
+    }));
+  });
 });

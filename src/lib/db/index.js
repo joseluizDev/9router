@@ -3,14 +3,14 @@ import { getAdapter } from "./driver.js";
 import { parseJson, stringifyJson } from "./helpers/jsonCol.js";
 
 // Settings
-export { exportSettings, getCloudUrl, getSettings, isCloudEnabled, updateSettings } from "./repos/settingsRepo.js";
+export { exportSettings, getCloudUrl, getSettings, invalidateSettingsCache, isCloudEnabled, updateSettings } from "./repos/settingsRepo.js";
 
 // Provider connections
 export { cleanupProviderConnections, createProviderConnection, deleteProviderConnection, deleteProviderConnectionsByProvider, getProviderConnectionById, getProviderConnections, reorderProviderConnections, updateProviderConnection } from "./repos/connectionsRepo.js";
 
 // Provider nodes
 export {
-  createProviderNode, deleteProviderNode, getProviderNodeById, getProviderNodes, updateProviderNode
+  createProviderNode, deleteProviderNode, getProviderNodeById, getProviderNodes, invalidateProviderNodesCache, updateProviderNode
 } from "./repos/nodesRepo.js";
 
 // Proxy pools
@@ -23,7 +23,7 @@ export { createApiKey, deleteApiKey, getApiKeyById, getApiKeys, updateApiKey, va
 
 // Combos
 export {
-  createCombo, deleteCombo, getComboById, getComboByName, getCombos, updateCombo
+  createCombo, deleteCombo, getComboById, getComboByName, getCombos, invalidateCombosCache, updateCombo
 } from "./repos/combosRepo.js";
 
 // Aliases (model + custom + mitm)
@@ -142,6 +142,13 @@ export async function importDb(payload) {
       db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
     }
   });
+
+  const { invalidateSettingsCache } = await import("./repos/settingsRepo.js");
+  const { invalidateProviderNodesCache } = await import("./repos/nodesRepo.js");
+  const { invalidateCombosCache } = await import("./repos/combosRepo.js");
+  invalidateSettingsCache();
+  invalidateProviderNodesCache();
+  invalidateCombosCache();
 
   return await exportDb();
 }

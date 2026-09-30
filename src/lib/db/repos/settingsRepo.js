@@ -99,9 +99,25 @@ export function mergeWithDefaults(raw) {
   return merged;
 }
 
+let cachedSettings = null;
+let cachedSettingsTs = 0;
+const SETTINGS_CACHE_TTL_MS = 5000;
+
+export function invalidateSettingsCache() {
+  cachedSettings = null;
+  cachedSettingsTs = 0;
+}
+
 export async function getSettings() {
+  const now = Date.now();
+  if (cachedSettings && (now - cachedSettingsTs < SETTINGS_CACHE_TTL_MS)) {
+    return cachedSettings;
+  }
   const raw = await readRaw();
-  return mergeWithDefaults(raw);
+  const merged = mergeWithDefaults(raw);
+  cachedSettings = merged;
+  cachedSettingsTs = now;
+  return merged;
 }
 
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
@@ -117,7 +133,10 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
-  return mergeWithDefaults(next);
+  const merged = mergeWithDefaults(next);
+  cachedSettings = merged;
+  cachedSettingsTs = Date.now();
+  return merged;
 }
 
 export async function isCloudEnabled() {

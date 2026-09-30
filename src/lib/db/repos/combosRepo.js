@@ -14,22 +14,35 @@ function rowToCombo(row) {
   };
 }
 
+let cachedCombos = null;
+let cachedCombosTs = 0;
+const COMBOS_CACHE_TTL_MS = 5000;
+
+export function invalidateCombosCache() {
+  cachedCombos = null;
+  cachedCombosTs = 0;
+}
+
 export async function getCombos() {
+  const now = Date.now();
+  if (cachedCombos && (now - cachedCombosTs < COMBOS_CACHE_TTL_MS)) {
+    return cachedCombos;
+  }
   const db = await getAdapter();
   const rows = db.all(`SELECT * FROM combos ORDER BY createdAt ASC`);
-  return rows.map(rowToCombo);
+  cachedCombos = rows.map(rowToCombo);
+  cachedCombosTs = now;
+  return cachedCombos;
 }
 
 export async function getComboById(id) {
-  const db = await getAdapter();
-  const row = db.get(`SELECT * FROM combos WHERE id = ?`, [id]);
-  return rowToCombo(row);
+  const combos = await getCombos();
+  return combos.find(c => c.id === id) || null;
 }
 
 export async function getComboByName(name) {
-  const db = await getAdapter();
-  const row = db.get(`SELECT * FROM combos WHERE name = ?`, [name]);
-  return rowToCombo(row);
+  const combos = await getCombos();
+  return combos.find(c => c.name === name) || null;
 }
 
 export async function createCombo(data) {
@@ -47,6 +60,7 @@ export async function createCombo(data) {
     `INSERT INTO combos(id, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
     [combo.id, combo.name, combo.kind, stringifyJson(combo.models), combo.createdAt, combo.updatedAt]
   );
+  invalidateCombosCache();
   return combo;
 }
 
@@ -63,11 +77,13 @@ export async function updateCombo(id, data) {
     );
     result = merged;
   });
+  invalidateCombosCache();
   return result;
 }
 
 export async function deleteCombo(id) {
   const db = await getAdapter();
   const res = db.run(`DELETE FROM combos WHERE id = ?`, [id]);
+  invalidateCombosCache();
   return (res?.changes ?? 0) > 0;
 }

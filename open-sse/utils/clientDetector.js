@@ -32,8 +32,20 @@ export function detectClientTool(headers = {}, body = {}) {
     return "github-copilot";
   }
 
-  // Claude Code / Claude CLI
-  if (ua.includes("claude-cli") || ua.includes("claude-code") || xApp === "cli") return "claude";
+  // Claude Code / Claude CLI / Anthropic SDK
+  const hasAnthropicHeader = !!(
+    headers["anthropic-version"] ||
+    headers["Anthropic-Version"] ||
+    headers["anthropic-beta"] ||
+    headers["Anthropic-Beta"]
+  );
+  if (
+    ua.includes("claude-cli") ||
+    ua.includes("claude-code") ||
+    ua.includes("anthropic") ||
+    hasAnthropicHeader ||
+    xApp === "cli"
+  ) return "claude";
 
   // Gemini CLI
   if (ua.includes("gemini-cli")) return "gemini-cli";

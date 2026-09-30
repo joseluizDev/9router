@@ -1,15 +1,14 @@
-import { translateResponse, initState } from "../translator/index.js";
+import { appendRequestLog, trackPendingRequest } from "@/lib/usageDb.js";
 import { FORMATS } from "../translator/formats.js";
-import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
-import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
-import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE } from "./streamHelpers.js";
-import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
+import { initState, translateResponse } from "../translator/index.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
+import { formatIncompleteOpenAIResponsesStreamFailure, getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent } from "./responsesStreamHelpers.js";
+import { fixInvalidId, formatSSE, hasValuableContent, parseSSELine } from "./streamHelpers.js";
+import { addBufferToUsage, COLORS, estimateUsage, extractUsage, filterUsageForFormat, hasValidUsage, logUsage, mergeUsage } from "./usageTracking.js";
 
 import { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER } from "./sseConstants.js";
 
-export { COLORS, formatSSE };
-export { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
+export { COLORS, formatSSE, SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
 
 // sharedEncoder is stateless — safe to share across streams
 const sharedEncoder = new TextEncoder();
@@ -146,7 +145,7 @@ export function createSSEStream(options = {}) {
           let responsesTerminal = false;
 
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
-            // Fast-path: detect pure content deltas in OpenAI format to skip JSON.parse / object allocation
+            // Fast-path: detect pure content deltas in OpenAI or Claude format to skip JSON.parse / object allocation
             const isPureContentDelta =
               !currentOpenAIResponsesEvent &&
               trimmed.includes('"chat.completion.chunk"') &&
@@ -159,8 +158,20 @@ export function createSSEStream(options = {}) {
               !trimmed.includes('"prompt_filter_results"') &&
               !trimmed.includes('"content_filter_results"');
 
-            if (isPureContentDelta) {
-              const contentMatch = trimmed.match(/"content":"((?:[^"\\]|\\.)*)"/);
+            const isPureClaudeDelta =
+              trimmed.includes('"content_block_delta"') &&
+              trimmed.includes('"text_delta"') &&
+              trimmed.includes('"text":') &&
+              !trimmed.includes('"thinking"') &&
+              !trimmed.includes('"input_json"') &&
+              !trimmed.includes('"partial_json"') &&
+              !trimmed.includes('"tool_use"');
+
+            if (isPureContentDelta || isPureClaudeDelta) {
+              const matchRegex = isPureContentDelta
+                ? /"content":"((?:[^"\\]|\\.)*)"/
+                : /"text":"((?:[^"\\]|\\.)*)"/;
+              const contentMatch = trimmed.match(matchRegex);
               if (contentMatch && contentMatch[1].length > 0) {
                 let content = contentMatch[1];
                 if (content.includes("\\")) {
@@ -225,7 +236,7 @@ export function createSSEStream(options = {}) {
                 }
               }
 
-              if (!hasValuableContent(parsed, FORMATS.OPENAI)) {
+              if (!hasValuableContent(parsed, parsed?.type ? FORMATS.CLAUDE : FORMATS.OPENAI)) {
                 continue;
               }
 
@@ -239,6 +250,20 @@ export function createSSEStream(options = {}) {
               if (reasoning && typeof reasoning === "string") {
                 totalContentLength += reasoning.length;
                 accumulatedThinking += reasoning;
+              }
+
+              // Claude format deltas (thinking, non-fastpath text, etc.)
+              if (parsed?.type === "content_block_delta") {
+                const cText = parsed.delta?.text;
+                if (cText && typeof cText === "string") {
+                  totalContentLength += cText.length;
+                  accumulatedContent += cText;
+                }
+                const cThinking = parsed.delta?.thinking;
+                if (cThinking && typeof cThinking === "string") {
+                  totalContentLength += cThinking.length;
+                  accumulatedThinking += cThinking;
+                }
               }
 
               const extracted = extractUsage(parsed);

@@ -38,18 +38,34 @@ function upsert(db, n) {
   );
 }
 
+let cachedNodes = null;
+let cachedNodesTs = 0;
+const NODES_CACHE_TTL_MS = 5000;
+
+export function invalidateProviderNodesCache() {
+  cachedNodes = null;
+  cachedNodesTs = 0;
+}
+
 export async function getProviderNodes(filter = {}) {
-  const db = await getAdapter();
-  const where = [];
-  const params = [];
-  if (filter.type) { where.push("type = ?"); params.push(filter.type); }
-  const sql = `SELECT * FROM providerNodes${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
-  return db.all(sql, params).map(rowToNode);
+  const now = Date.now();
+  let allNodes = cachedNodes;
+  if (!allNodes || (now - cachedNodesTs >= NODES_CACHE_TTL_MS)) {
+    const db = await getAdapter();
+    const rows = db.all(`SELECT * FROM providerNodes`);
+    allNodes = rows.map(rowToNode);
+    cachedNodes = allNodes;
+    cachedNodesTs = now;
+  }
+  if (filter.type) {
+    return allNodes.filter(n => n.type === filter.type);
+  }
+  return allNodes;
 }
 
 export async function getProviderNodeById(id) {
-  const db = await getAdapter();
-  return rowToNode(db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]));
+  const nodes = await getProviderNodes();
+  return nodes.find(n => n.id === id) || null;
 }
 
 export async function createProviderNode(data) {
@@ -66,6 +82,7 @@ export async function createProviderNode(data) {
     updatedAt: now,
   };
   upsert(db, node);
+  invalidateProviderNodesCache();
   return node;
 }
 
@@ -79,6 +96,7 @@ export async function updateProviderNode(id, data) {
     upsert(db, merged);
     result = merged;
   });
+  invalidateProviderNodesCache();
   return result;
 }
 
@@ -91,5 +109,6 @@ export async function deleteProviderNode(id) {
     removed = rowToNode(row);
     db.run(`DELETE FROM providerNodes WHERE id = ?`, [id]);
   });
+  invalidateProviderNodesCache();
   return removed;
 }
