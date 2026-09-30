@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../open-sse/translator/concerns/image.js", async (orig) => {
   const actual = await orig();
@@ -8,8 +8,8 @@ vi.mock("../../open-sse/translator/concerns/image.js", async (orig) => {
   };
 });
 
-import { prefetchRemoteImages } from "../../open-sse/translator/concerns/prefetch.js";
 import { fetchImageAsBase64 } from "../../open-sse/translator/concerns/image.js";
+import { prefetchRemoteImages } from "../../open-sse/translator/concerns/prefetch.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
 
 beforeEach(() => { fetchImageAsBase64.mockClear(); });
@@ -71,5 +71,37 @@ describe("prefetchRemoteImages", () => {
     const n = await prefetchRemoteImages(body, FORMATS.CLAUDE, FORMATS.COMMANDCODE);
     expect(n).toBe(1);
     expect(body.messages[0].content[0].source.type).toBe("base64");
+  });
+
+  it("fetches multiple remote image URLs concurrently via Promise.all", async () => {
+    let activeFetches = 0;
+    let maxConcurrent = 0;
+    fetchImageAsBase64.mockImplementation(async () => {
+      activeFetches++;
+      maxConcurrent = Math.max(maxConcurrent, activeFetches);
+      await new Promise(r => setTimeout(r, 20));
+      activeFetches--;
+      return { url: "data:image/png;base64,QUJD", mimeType: "image/png" };
+    });
+
+    const body = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: "https://x/1.png" } },
+            { type: "image_url", image_url: { url: "https://x/2.png" } },
+            { type: "image_url", image_url: { url: "https://x/3.png" } },
+          ],
+        },
+      ],
+    };
+
+    const n = await prefetchRemoteImages(body, FORMATS.OPENAI, FORMATS.OLLAMA);
+    expect(n).toBe(3);
+    expect(maxConcurrent).toBeGreaterThan(1);
+    expect(body.messages[0].content[0].image_url.url.startsWith("data:image/png;base64,")).toBe(true);
+    expect(body.messages[0].content[1].image_url.url.startsWith("data:image/png;base64,")).toBe(true);
+    expect(body.messages[0].content[2].image_url.url.startsWith("data:image/png;base64,")).toBe(true);
   });
 });

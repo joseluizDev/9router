@@ -1,9 +1,45 @@
 import { Readable } from "stream";
+import { Agent, setGlobalDispatcher } from "undici";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
-import { dbg } from "./debugLog.js";
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
+
+// Global keep-alive agent tuned for AI API traffic (60s keep-alive, TCP_NODELAY)
+let _tunedAgent = null;
+export function getTunedAgent() {
+  if (!_tunedAgent) {
+    try {
+      if (typeof Agent === "function") {
+        _tunedAgent = new Agent({
+          keepAliveTimeout: 60_000,
+          keepAliveMaxTimeout: 600_000,
+          connections: 100,
+          pipelining: 1,
+          connect: {
+            noDelay: true,
+          },
+        });
+        if (typeof setGlobalDispatcher === "function") {
+          try {
+            setGlobalDispatcher(_tunedAgent);
+          } catch {}
+        }
+      } else {
+        _tunedAgent = {};
+      }
+    } catch {
+      _tunedAgent = {};
+    }
+  }
+  return _tunedAgent;
+}
+
+// Warm dispatcher on module load
+try {
+  getTunedAgent();
+} catch {}
+
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -236,7 +272,12 @@ async function getDispatcher(proxyUrl) {
       proxyDispatchers.delete(proxyDispatchers.keys().next().value);
     }
     const { ProxyAgent } = await import("undici");
-    proxyDispatchers.set(normalized, new ProxyAgent({ uri: normalized }));
+    proxyDispatchers.set(normalized, new ProxyAgent({
+      uri: normalized,
+      keepAliveTimeout: 60_000,
+      keepAliveMaxTimeout: 600_000,
+      connect: { noDelay: true },
+    }));
   }
 
   return proxyDispatchers.get(normalized);
@@ -379,12 +420,19 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
         throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
       }
       console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
+      const fallbackAgent = getTunedAgent();
+      if (fallbackAgent && typeof fallbackAgent.dispatch === "function" && !options.dispatcher) {
+        return originalFetch(url, { ...options, dispatcher: fallbackAgent });
+      }
       return originalFetch(url, options);
     }
   }
 
-  // got-scraping disabled — use native fetch directly
-  // (Re-enable per-host by wrapping with tryGotScrapingFetch when needed)
+  // got-scraping disabled — use native fetch directly with tuned keep-alive dispatcher
+  const tunedAgent = getTunedAgent();
+  if (tunedAgent && typeof tunedAgent.dispatch === "function" && !options.dispatcher) {
+    return originalFetch(url, { ...options, dispatcher: tunedAgent });
+  }
   return originalFetch(url, options);
 }
 

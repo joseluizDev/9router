@@ -82,16 +82,20 @@ export async function prefetchRemoteImages(body, sourceFormat, targetFormat, opt
   const refs = collectImageRefs(body, sourceFormat);
   if (!refs.length) return 0;
 
-  let converted = 0;
-  for (const ref of refs) {
+  const results = await Promise.all(refs.map(async (ref) => {
     const url = ref.get();
-    if (parseDataUri(url)) continue; // already inline
+    if (parseDataUri(url)) return false; // already inline
     const fetched = await fetchImageAsBase64(url, options);
-    if (!fetched) continue;
+    if (!fetched) return false;
     if (ref.set) ref.set(fetched.url);
-    else if (ref.part) { delete ref.part.fileData; ref.part.inlineData = { mimeType: fetched.mimeType, data: fetched.url.split(",")[1] }; }
-    else if (ref.claudeBlock) ref.claudeBlock.source = { type: "base64", media_type: fetched.mimeType, data: fetched.url.split(",")[1] };
-    converted++;
-  }
-  return converted;
+    else if (ref.part) {
+      delete ref.part.fileData;
+      ref.part.inlineData = { mimeType: fetched.mimeType, data: fetched.url.split(",")[1] };
+    } else if (ref.claudeBlock) {
+      ref.claudeBlock.source = { type: "base64", media_type: fetched.mimeType, data: fetched.url.split(",")[1] };
+    }
+    return true;
+  }));
+
+  return results.filter(Boolean).length;
 }

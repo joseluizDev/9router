@@ -6,8 +6,20 @@ import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
-// Mutex to prevent race conditions during account selection
-let selectionMutex = Promise.resolve();
+// Partitioned mutex map per provider to prevent cross-provider blocking
+const providerMutexes = new Map();
+
+// In-memory state for round-robin rotation to avoid synchronous SQLite writes blocking selection
+const connectionRoundRobinState = new Map();
+
+function getProviderMutex(providerId) {
+  let mutex = providerMutexes.get(providerId);
+  if (!mutex) {
+    mutex = Promise.resolve();
+    providerMutexes.set(providerId, mutex);
+  }
+  return mutex;
+}
 
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
 
@@ -31,16 +43,17 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
-  // Acquire mutex to prevent race conditions
-  const currentMutex = selectionMutex;
+
+  // Resolve alias to provider ID (e.g., "kc" -> "kilocode")
+  const providerId = resolveProviderId(provider);
+
+  // Acquire per-provider mutex to prevent race conditions without blocking other providers
+  const currentMutex = getProviderMutex(providerId);
   let resolveMutex;
-  selectionMutex = new Promise(resolve => { resolveMutex = resolve; });
+  providerMutexes.set(providerId, new Promise(resolve => { resolveMutex = resolve; }));
 
   try {
     await currentMutex;
-
-    // Resolve alias to provider ID (e.g., "kc" -> "kilocode")
-    const providerId = resolveProviderId(provider);
 
     // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings)
     if (FREE_PROVIDERS[providerId]?.noAuth) {
@@ -151,8 +164,21 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     } else if (strategy === "round-robin") {
       const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
 
+      // Overlay in-memory state on connections to reflect instant rotations
+      const connsWithState = availableConnections.map(c => {
+        const ram = connectionRoundRobinState.get(c.id);
+        if (ram) {
+          return {
+            ...c,
+            lastUsedAt: ram.lastUsedAt,
+            consecutiveUseCount: ram.consecutiveUseCount,
+          };
+        }
+        return c;
+      });
+
       // Sort by lastUsed (most recent first) to find current candidate
-      const byRecency = [...availableConnections].sort((a, b) => {
+      const byRecency = [...connsWithState].sort((a, b) => {
         if (!a.lastUsedAt && !b.lastUsedAt) return (a.priority || 999) - (b.priority || 999);
         if (!a.lastUsedAt) return 1;
         if (!b.lastUsedAt) return -1;
@@ -162,17 +188,14 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       const current = byRecency[0];
       const currentCount = current?.consecutiveUseCount || 0;
 
+      let nextCount = 1;
       if (current && current.lastUsedAt && currentCount < stickyLimit) {
         // Stay with current account
         connection = current;
-        // Update lastUsedAt and increment count (await to ensure persistence)
-        await updateProviderConnection(connection.id, {
-          lastUsedAt: new Date().toISOString(),
-          consecutiveUseCount: (connection.consecutiveUseCount || 0) + 1
-        });
+        nextCount = (current.consecutiveUseCount || 0) + 1;
       } else {
         // Pick the least recently used (excluding current if possible)
-        const sortedByOldest = [...availableConnections].sort((a, b) => {
+        const sortedByOldest = [...connsWithState].sort((a, b) => {
           if (!a.lastUsedAt && !b.lastUsedAt) return (a.priority || 999) - (b.priority || 999);
           if (!a.lastUsedAt) return -1;
           if (!b.lastUsedAt) return 1;
@@ -180,13 +203,24 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         });
 
         connection = sortedByOldest[0];
-
-        // Update lastUsedAt and reset count to 1 (await to ensure persistence)
-        await updateProviderConnection(connection.id, {
-          lastUsedAt: new Date().toISOString(),
-          consecutiveUseCount: 1
-        });
+        nextCount = 1;
       }
+
+      const nowIso = new Date().toISOString();
+      connection.lastUsedAt = nowIso;
+      connection.consecutiveUseCount = nextCount;
+      connectionRoundRobinState.set(connection.id, {
+        lastUsedAt: nowIso,
+        consecutiveUseCount: nextCount,
+      });
+
+      // Fire-and-forget update to SQLite to prevent disk I/O from blocking credential selection
+      updateProviderConnection(connection.id, {
+        lastUsedAt: nowIso,
+        consecutiveUseCount: nextCount,
+      }).catch(err => {
+        log.warn("AUTH", `Background updateProviderConnection failed for ${connection.id}: ${err.message}`);
+      });
     } else {
       // Default: fill-first (already sorted by priority in getProviderConnections)
       connection = availableConnections[0];
