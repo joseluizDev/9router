@@ -1,7 +1,6 @@
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
-import { getMeta, setMeta } from "../helpers/metaStore.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -27,12 +26,108 @@ if (!global._recentRing) global._recentRing = { items: [], initialized: false };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
 
+if (!global._pendingDailyAggregates) global._pendingDailyAggregates = new Map();
+if (!global._pendingLifetimeRequests) global._pendingLifetimeRequests = 0;
+if (!global._dailyFlushTimer) global._dailyFlushTimer = null;
+
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
 const pendingTimers = global._pendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
 const statsEmitTimers = global._statsEmitTimers;
+const pendingDailyAggregates = global._pendingDailyAggregates;
+
+let lastTimestampMs = 0;
+let timestampSeq = 0;
+
+function generateRequestTimestamp() {
+  const now = Date.now();
+  if (now === lastTimestampMs) {
+    timestampSeq++;
+  } else {
+    lastTimestampMs = now;
+    timestampSeq = 0;
+  }
+  const base = new Date(now).toISOString();
+  if (timestampSeq === 0) return base;
+  return base.replace("Z", `.${String(timestampSeq).padStart(3, "0")}Z`);
+}
+
+export function flushDailyAggregatesSync() {
+  if (pendingDailyAggregates.size === 0 && !global._pendingLifetimeRequests) return;
+  try {
+    const db = getAdapterSync();
+    if (!db) return;
+    db.transaction(() => {
+      for (const [dateKey, day] of pendingDailyAggregates.entries()) {
+        db.run(
+          `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
+          [dateKey, stringifyJson(day)]
+        );
+      }
+      pendingDailyAggregates.clear();
+
+      if (global._pendingLifetimeRequests > 0) {
+        const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
+        const next = (cur ? parseInt(cur.value, 10) : 0) + global._pendingLifetimeRequests;
+        db.run(
+          `INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          [String(next)]
+        );
+        global._pendingLifetimeRequests = 0;
+      }
+    });
+  } catch (err) {
+    console.error("[USAGE] Error in flushDailyAggregatesSync:", err);
+  }
+}
+
+export async function flushDailyAggregates() {
+  if (pendingDailyAggregates.size === 0 && !global._pendingLifetimeRequests) return;
+  try {
+    const db = await getAdapter();
+    db.transaction(() => {
+      for (const [dateKey, day] of pendingDailyAggregates.entries()) {
+        db.run(
+          `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
+          [dateKey, stringifyJson(day)]
+        );
+      }
+      pendingDailyAggregates.clear();
+
+      if (global._pendingLifetimeRequests > 0) {
+        const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
+        const next = (cur ? parseInt(cur.value, 10) : 0) + global._pendingLifetimeRequests;
+        db.run(
+          `INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          [String(next)]
+        );
+        global._pendingLifetimeRequests = 0;
+      }
+    });
+  } catch (err) {
+    console.error("[USAGE] Error in flushDailyAggregates:", err);
+  }
+}
+
+function scheduleDailyFlush() {
+  if (global._dailyFlushTimer) return;
+  global._dailyFlushTimer = setTimeout(() => {
+    global._dailyFlushTimer = null;
+    flushDailyAggregates().catch(() => {});
+  }, 2000);
+  global._dailyFlushTimer?.unref?.();
+}
+
+if (typeof process !== "undefined") {
+  const onExit = () => {
+    flushDailyAggregatesSync();
+  };
+  process.once("beforeExit", onExit);
+  process.once("SIGINT", onExit);
+  process.once("SIGTERM", onExit);
+}
 
 export const statsEmitter = global._statsEmitter;
 
@@ -243,7 +338,7 @@ export async function saveRequestUsage(entry) {
   try {
     const db = await getAdapter();
 
-    if (!entry.timestamp) entry.timestamp = new Date().toISOString();
+    if (!entry.timestamp) entry.timestamp = generateRequestTimestamp();
     entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens);
 
     const tokens = entry.tokens || {};
@@ -252,8 +347,6 @@ export async function saveRequestUsage(entry) {
 
     let inserted = false;
 
-    // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
-    // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
     db.transaction(() => {
       const existing = db.get(
         `SELECT id, endpoint FROM usageHistory
@@ -290,22 +383,22 @@ export async function saveRequestUsage(entry) {
       );
 
       const dateKey = getLocalDateKey(entry.timestamp);
-      const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
-      const day = row ? parseJson(row.data, {}) : {
-        requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
-        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
-      };
+      let day = pendingDailyAggregates.get(dateKey);
+      if (!day) {
+        const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+        day = row ? parseJson(row.data, {}) : {
+          requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+          byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+        };
+        pendingDailyAggregates.set(dateKey, day);
+      }
       aggregateEntryToDay(day, entry);
-      db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
-
-      // Atomic counter increment in same transaction
-      const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
-      const next = (cur ? parseInt(cur.value, 10) : 0) + 1;
-      db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
+      global._pendingLifetimeRequests = (global._pendingLifetimeRequests || 0) + 1;
       inserted = true;
     });
 
     if (inserted) {
+      scheduleDailyFlush();
       pushToRing(entry);
       scheduleStatsEvent("update", 250);
     }
@@ -335,6 +428,7 @@ export async function getUsageHistory(filter = {}) {
 }
 
 function loadDaysInRange(adapter, maxDays) {
+  flushDailyAggregatesSync();
   if (maxDays == null) {
     return adapter.all(`SELECT dateKey, data FROM usageDaily ORDER BY dateKey ASC`);
   }
@@ -345,6 +439,7 @@ function loadDaysInRange(adapter, maxDays) {
 }
 
 export async function getUsageStats(period = "all") {
+  await flushDailyAggregates();
   const db = await getAdapter();
 
   const [{ getProviderConnections }, { getApiKeys }, { getProviderNodes }] = await Promise.all([
@@ -669,6 +764,7 @@ export async function getUsageStats(period = "all") {
 }
 
 export async function getChartData(period = "7d") {
+  await flushDailyAggregates();
   const db = await getAdapter();
   const now = Date.now();
 

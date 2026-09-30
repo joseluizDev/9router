@@ -1,71 +1,52 @@
 // Public API barrel — all DB functions
 import { getAdapter } from "./driver.js";
-import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
+import { parseJson, stringifyJson } from "./helpers/jsonCol.js";
 
 // Settings
-export {
-  getSettings, updateSettings, isCloudEnabled, getCloudUrl, exportSettings,
-} from "./repos/settingsRepo.js";
+export { exportSettings, getCloudUrl, getSettings, isCloudEnabled, updateSettings } from "./repos/settingsRepo.js";
 
 // Provider connections
-export {
-  getProviderConnections, getProviderConnectionById,
-  createProviderConnection, updateProviderConnection,
-  deleteProviderConnection, deleteProviderConnectionsByProvider,
-  reorderProviderConnections, cleanupProviderConnections,
-} from "./repos/connectionsRepo.js";
+export { cleanupProviderConnections, createProviderConnection, deleteProviderConnection, deleteProviderConnectionsByProvider, getProviderConnectionById, getProviderConnections, reorderProviderConnections, updateProviderConnection } from "./repos/connectionsRepo.js";
 
 // Provider nodes
 export {
-  getProviderNodes, getProviderNodeById,
-  createProviderNode, updateProviderNode, deleteProviderNode,
+  createProviderNode, deleteProviderNode, getProviderNodeById, getProviderNodes, updateProviderNode
 } from "./repos/nodesRepo.js";
 
 // Proxy pools
 export {
-  getProxyPools, getProxyPoolById,
-  createProxyPool, updateProxyPool, deleteProxyPool,
+  createProxyPool, deleteProxyPool, getProxyPoolById, getProxyPools, updateProxyPool
 } from "./repos/proxyPoolsRepo.js";
 
 // API keys
-export {
-  getApiKeys, getApiKeyById, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
-} from "./repos/apiKeysRepo.js";
+export { createApiKey, deleteApiKey, getApiKeyById, getApiKeys, updateApiKey, validateApiKey } from "./repos/apiKeysRepo.js";
 
 // Combos
 export {
-  getCombos, getComboById, getComboByName,
-  createCombo, updateCombo, deleteCombo,
+  createCombo, deleteCombo, getComboById, getComboByName, getCombos, updateCombo
 } from "./repos/combosRepo.js";
 
 // Aliases (model + custom + mitm)
 export {
-  getModelAliases, setModelAlias, deleteModelAlias,
-  getCustomModels, addCustomModel, deleteCustomModel,
-  getMitmAlias, setMitmAliasAll,
+  addCustomModel, deleteCustomModel, deleteModelAlias,
+  getCustomModels, getMitmAlias, getModelAliases, setMitmAliasAll, setModelAlias
 } from "./repos/aliasRepo.js";
 
 // Pricing
 export {
-  getPricing, getPricingForModel, updatePricing, resetPricing, resetAllPricing,
+  getPricing, getPricingForModel, resetAllPricing, resetPricing, updatePricing
 } from "./repos/pricingRepo.js";
 
 // Disabled models
-export {
-  getDisabledModels, getDisabledByProvider, disableModels, enableModels,
-} from "./repos/disabledModelsRepo.js";
+export { disableModels, enableModels, getDisabledByProvider, getDisabledModels } from "./repos/disabledModelsRepo.js";
 
 // Usage
 export {
-  statsEmitter, trackPendingRequest, getActiveRequests,
-  saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
-  appendRequestLog, getRecentLogs,
+  appendRequestLog, flushDailyAggregates, flushDailyAggregatesSync, getActiveRequests, getChartData, getRecentLogs, getUsageHistory, getUsageStats, saveRequestUsage, statsEmitter, trackPendingRequest
 } from "./repos/usageRepo.js";
 
 // Request details
-export {
-  saveRequestDetail, getRequestDetails, getRequestDetailById, getDistinctProviders,
-} from "./repos/requestDetailsRepo.js";
+export { getDistinctProviders, getRequestDetailById, getRequestDetails, saveRequestDetail } from "./repos/requestDetailsRepo.js";
 
 // Export/import full DB
 export async function exportDb() {

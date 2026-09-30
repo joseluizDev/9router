@@ -119,10 +119,12 @@ export function createSSEStream(options = {}) {
       buffer += text;
       reqLogger?.appendProviderChunk?.(text);
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      let startIdx = 0;
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf("\n", startIdx)) !== -1) {
+        const line = buffer.slice(startIdx, newlineIdx);
+        startIdx = newlineIdx + 1;
 
-      for (const line of lines) {
         const trimmed = line.trim();
         if (isDebugEnabled && trimmed) {
           sseLineCount++;
@@ -144,6 +146,45 @@ export function createSSEStream(options = {}) {
           let responsesTerminal = false;
 
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
+            // Fast-path: detect pure content deltas in OpenAI format to skip JSON.parse / object allocation
+            const isPureContentDelta =
+              !currentOpenAIResponsesEvent &&
+              trimmed.includes('"chat.completion.chunk"') &&
+              trimmed.includes('"created":') &&
+              (trimmed.includes('"id":"chatcmpl-') || trimmed.includes('"id":"gen-')) &&
+              trimmed.includes('"content":') &&
+              !trimmed.includes('"finish_reason":"') &&
+              !trimmed.includes('"tool_calls"') &&
+              !trimmed.includes('"usage"') &&
+              !trimmed.includes('"prompt_filter_results"') &&
+              !trimmed.includes('"content_filter_results"');
+
+            if (isPureContentDelta) {
+              const contentMatch = trimmed.match(/"content":"((?:[^"\\]|\\.)*)"/);
+              if (contentMatch && contentMatch[1].length > 0) {
+                let content = contentMatch[1];
+                if (content.includes("\\")) {
+                  try {
+                    content = JSON.parse(`"${content}"`);
+                  } catch {
+                    // keep raw match if parse fails
+                  }
+                }
+                totalContentLength += content.length;
+                accumulatedContent += content;
+
+                if (line.startsWith("data:") && !line.startsWith("data: ")) {
+                  output = "data: " + line.slice(5) + "\n";
+                } else {
+                  output = line + "\n";
+                }
+
+                reqLogger?.appendConvertedChunk?.(output);
+                controller.enqueue(sharedEncoder.encode(output));
+                continue;
+              }
+            }
+
             try {
               const parsed = JSON.parse(trimmed.slice(5).trim());
 
@@ -378,6 +419,7 @@ export function createSSEStream(options = {}) {
           }
         }
       }
+      buffer = startIdx > 0 ? buffer.slice(startIdx) : buffer;
     },
 
     flush(controller) {
