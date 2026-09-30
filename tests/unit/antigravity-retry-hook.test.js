@@ -1,5 +1,5 @@
 // Guards D3: antigravity 429/503 retry merged into base via computeRetryDelay hook.
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
 import antigravity from "../../open-sse/providers/registry/antigravity.js";
 
@@ -28,23 +28,22 @@ describe("antigravity computeRetryDelay hook (D3)", () => {
     expect(await ag.computeRetryDelay(r, 1)).toBe(3000);
   });
 
-  it("exponential backoff for 429 when no retry info", async () => {
-    expect(await ag.computeRetryDelay(res(429), 1)).toBe(Math.min(1000 * 2 ** 1, MAX));
-    expect(await ag.computeRetryDelay(res(429), 3)).toBe(Math.min(1000 * 2 ** 3, MAX));
+  it("fast-fails (false) on 429 when no retry info to trigger account fallback", async () => {
+    expect(await ag.computeRetryDelay(res(429), 1)).toBe(false);
   });
 
   it("503 without retry info → transient backoff", async () => {
-    expect(await ag.computeRetryDelay(res(503), 1)).toBe(2000);
+    expect(await ag.computeRetryDelay(res(503), 1, 500)).toBe(500);
   });
 
   it("retries Antigravity agent terminated body even when status is not 429", async () => {
     const r = res(500, {}, { error: { message: "Agent execution terminated due to error" } });
-    expect(await ag.computeRetryDelay(r, 1)).toBe(2000);
+    expect(await ag.computeRetryDelay(r, 1, 500)).toBe(500);
   });
 
   it("retries high traffic body", async () => {
     const r = res(500, {}, { error: { message: "Our servers are experiencing high traffic" } });
-    expect(await ag.computeRetryDelay(r, 2)).toBe(4000);
+    expect(await ag.computeRetryDelay(r, 2, 500)).toBe(1000);
   });
 
   it("does not retry non-transient 400 errors", async () => {

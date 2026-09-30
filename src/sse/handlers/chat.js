@@ -1,30 +1,30 @@
 import "open-sse/index.js";
 
+import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
+import { getSettings } from "@/lib/localDb";
+import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
+import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
+import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
+import { handleChatCore } from "open-sse/handlers/chatCore.js";
+import { augmentModelsWithCapacityAdapter, getActiveAdapterStrategy, withCapacityAdapterStripping } from "open-sse/services/capacityAdapter.js";
+import { detectRequiredCapabilities, handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
+import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
+import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
+import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { upstreamResponseHeaders } from "open-sse/utils/upstreamHeaders.js";
+import { ANTIGRAVITY_QUOTA_TIMEOUT_MS, clearAntigravityStrikes, handleAntigravityQuotaError } from "../services/antigravityQuota.js";
 import {
-  getProviderCredentials,
-  markAccountUnavailable,
   clearAccountError,
   extractApiKey,
+  getProviderCredentials,
   isValidApiKey,
+  markAccountUnavailable,
 } from "../services/auth.js";
-import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings } from "@/lib/localDb";
-import { getModelInfo, getComboModels } from "../services/model.js";
-import { handleChatCore } from "open-sse/handlers/chatCore.js";
-import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
-import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
-import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
-import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
-import { upstreamResponseHeaders } from "open-sse/utils/upstreamHeaders.js";
-import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
-import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
-import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
-import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
+import { getComboModels, getModelInfo } from "../services/model.js";
+import { checkAndRefreshToken, updateProviderCredentials } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
-import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
-import { getProjectIdForConnection } from "open-sse/services/projectId.js";
-import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 
 /**
  * Handle chat completion request
@@ -311,19 +311,28 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     if (result.success) return result.response;
 
-    // Antigravity 409/429: refresh live quota to get exact resetAt before locking
+    // Antigravity 409/429: refresh live quota with bounded wait (1.5s) to avoid stalling chat fallback.
+    // If upstream quota call is slow, fallback proceeds immediately and refresh finishes in background.
     let quotaResetMs = null;
     let resetsAtMs = result.resetsAtMs;
     if (provider === "antigravity" && (result.status === 409 || result.status === 429)) {
-      quotaResetMs = await handleAntigravityQuotaError(
+      const quotaPromise = handleAntigravityQuotaError(
         credentials.connectionId, result.status, model,
         refreshedCredentials.accessToken, credentials.providerSpecificData
-      );
+      ).catch(err => {
+        log.warn("AG_QUOTA", `${credentials.connectionId.slice(0, 8)} | background quota refresh failed: ${err.message}`);
+        return null;
+      });
+
+      quotaResetMs = await Promise.race([
+        quotaPromise,
+        new Promise(resolve => setTimeout(() => resolve(null), ANTIGRAVITY_QUOTA_TIMEOUT_MS))
+      ]);
       if (quotaResetMs) resetsAtMs = quotaResetMs;
     }
 
-    // Exhausted Antigravity model is blocked only in RAM cache until upstream resetAt.
-    // Do not persist a modelLock_* for this path.
+    // Exhausted Antigravity model is blocked only in RAM cache if resolved within timeout.
+    // If timed out or strike not tripped, markAccountUnavailable sets a transient cooldown and falls back.
     const shouldFallback = provider === "antigravity" && quotaResetMs
       ? true
       : (await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, resetsAtMs)).shouldFallback;

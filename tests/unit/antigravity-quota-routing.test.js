@@ -27,7 +27,7 @@ vi.mock("open-sse/services/usage/google.js", () => ({
 }));
 vi.mock("@/sse/utils/logger.js", () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }));
 
-const { getAntigravityQuotaCache, handleAntigravityQuotaError, refreshAntigravityQuota, clearAntigravityStrikes } = await import("@/sse/services/antigravityQuota.js");
+const { getAntigravityQuotaCache, handleAntigravityQuotaError, refreshAntigravityQuota, clearAntigravityStrikes, ANTIGRAVITY_QUOTA_TIMEOUT_MS } = await import("@/sse/services/antigravityQuota.js");
 const { getProviderCredentials } = await import("@/sse/services/auth.js");
 
 const MODEL = "claude-opus-4-6-thinking";
@@ -307,5 +307,33 @@ describe("Antigravity quota-aware routing", () => {
     // Optimistic reading must NOT poison the shared cache (auth pre-filter
     // treats cached 0% as exhausted).
     expect(getAntigravityQuotaCache().get("ag-optimistic")?.[MODEL]?.remainingPercentage).toBe(90);
+  });
+
+  it("exports ANTIGRAVITY_QUOTA_TIMEOUT_MS and allows background completion when race times out", async () => {
+    expect(ANTIGRAVITY_QUOTA_TIMEOUT_MS).toBe(1500);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T00:00:00.000Z"));
+
+    try {
+      let resolveUsage;
+      mocks.getAntigravityUsage.mockReturnValue(new Promise(resolve => { resolveUsage = resolve; }));
+
+      // Start quota error handling
+      const quotaPromise = handleAntigravityQuotaError("ag-timeout", 429, MODEL, "token", {});
+
+      // Advance timers by timeout duration to simulate race timeout
+      await vi.advanceTimersByTimeAsync(ANTIGRAVITY_QUOTA_TIMEOUT_MS);
+
+      // Background promise is still in-flight; resolve it now
+      resolveUsage({ quotas: { [MODEL]: { remainingPercentage: 0, resetAt: FUTURE_RESET } } });
+      await expect(quotaPromise).resolves.toBe(Date.parse(FUTURE_RESET));
+      expect(getAntigravityQuotaCache().get("ag-timeout")[MODEL]).toEqual({
+        remainingPercentage: 0,
+        resetAt: FUTURE_RESET,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

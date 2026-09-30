@@ -1,13 +1,13 @@
 import crypto from "crypto";
-import { BaseExecutor } from "./base.js";
-import { PROVIDERS } from "../config/providers.js";
-import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
-import { HTTP_STATUS } from "../config/runtimeConfig.js";
-import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_HEADERS, ANTIGRAVITY_PROMPT_REWRITES, OAUTH_ENDPOINTS } from "../config/appConstants.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { PROVIDERS } from "../config/providers.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
+import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
+import { BaseExecutor } from "./base.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -18,7 +18,7 @@ function sanitizeFunctionName(name) {
 }
 
 const MAX_RETRY_AFTER_MS = 10000;
-const ANTIGRAVITY_TRANSIENT_RETRY_MAX_MS = 15000;
+const ANTIGRAVITY_TRANSIENT_RETRY_MAX_MS = 1000;
 const MAX_ANTIGRAVITY_OUTPUT_TOKENS = 64000;
 const ANTIGRAVITY_IDE_REQUEST_ID_RE = /^agent\/[^/]+\/\d+\/[^/]+\/\d+$/;
 
@@ -420,7 +420,7 @@ export class AntigravityExecutor extends BaseExecutor {
   // Hook called by BaseExecutor.tryRetry: derive delay from Retry-After (header → body),
   // cap at MAX_RETRY_AFTER_MS, else retry transient Antigravity failures with backoff.
   // Return false to veto (fallback URL / final error).
-  async computeRetryDelay(response, attempt) {
+  async computeRetryDelay(response, attempt, defaultDelayMs = 500) {
     let bodyText = "";
     let errorJson = null;
     let retryMs = this.parseRetryHeaders(response.headers);
@@ -439,12 +439,15 @@ export class AntigravityExecutor extends BaseExecutor {
     }
     if (retryMs) return retryMs <= MAX_RETRY_AFTER_MS ? retryMs : false;
 
+    // Fast-fail on 429 without explicit Retry-After to trigger immediate account fallback
+    if (response.status === HTTP_STATUS.RATE_LIMITED) {
+      return false;
+    }
+
     if (!this.isTransientAntigravityError(response.status, errorMessage)) return false;
 
-    const cap = response.status === HTTP_STATUS.RATE_LIMITED
-      ? MAX_RETRY_AFTER_MS
-      : ANTIGRAVITY_TRANSIENT_RETRY_MAX_MS;
-    return Math.min(1000 * (2 ** attempt), cap); // exponential backoff
+    // Transient server hiccups (500/503/etc.): brief backoff (500ms-1000ms max)
+    return Math.min(defaultDelayMs * attempt, ANTIGRAVITY_TRANSIENT_RETRY_MAX_MS);
   }
 
   /**

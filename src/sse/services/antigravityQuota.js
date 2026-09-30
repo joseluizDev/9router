@@ -16,6 +16,7 @@ const lastRefreshAt = new Map();
 const inflightRefresh = new Map();
 
 const MIN_REFRESH_INTERVAL_MS = 30_000; // 30s between refreshes per connection
+export const ANTIGRAVITY_QUOTA_TIMEOUT_MS = 1500; // Bounded wait for quota refresh in chat fallback path
 
 // Strike-based circuit breaker (#3681): Google's quota API can report remaining
 // quota while generation endpoints keep returning 429 (sprint/weekly dual-pool
