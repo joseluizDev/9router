@@ -135,6 +135,20 @@ async function tryGotScrapingFetch(url, options) {
 
 // DNS cache — use Map to avoid prototype pollution via malformed hostnames
 const DNS_CACHE = new Map();
+const TLS_CERT_ERRORS = new Set([
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "CERT_HAS_EXPIRED",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+function isTlsCertError(err) {
+  const code = err?.cause?.code || err?.code;
+  return TLS_CERT_ERRORS.has(code);
+}
 const MITM_BYPASS_HOSTS = [
   "cloudcode-pa.googleapis.com",
   "daily-cloudcode-pa.googleapis.com",
@@ -262,25 +276,56 @@ function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
 /**
  * Create proxy dispatcher lazily (undici-compatible)
  */
-async function getDispatcher(proxyUrl) {
+async function getDispatcher(proxyUrl, insecure = false) {
   const normalized = normalizeProxyUrl(proxyUrl);
-  if (!normalized) return null;
+  if (!normalized && !insecure) return null;
 
-  if (!proxyDispatchers.has(normalized)) {
+  const key = `${normalized || "direct"}::${insecure ? "insecure" : "secure"}`;
+  if (!proxyDispatchers.has(key)) {
     // Evict oldest entry if max size reached
     if (proxyDispatchers.size >= MEMORY_CONFIG.proxyDispatchersMaxSize) {
       proxyDispatchers.delete(proxyDispatchers.keys().next().value);
     }
-    const { ProxyAgent } = await import("undici");
-    proxyDispatchers.set(normalized, new ProxyAgent({
-      uri: normalized,
-      keepAliveTimeout: 60_000,
-      keepAliveMaxTimeout: 600_000,
-      connect: { noDelay: true },
-    }));
+    const { Agent, ProxyAgent } = await import("undici");
+    const connect = insecure ? { rejectUnauthorized: false, noDelay: true } : { noDelay: true };
+    const dispatcher = normalized
+      ? new ProxyAgent({
+          uri: normalized,
+          keepAliveTimeout: 60_000,
+          keepAliveMaxTimeout: 600_000,
+          connect: { noDelay: true },
+          ...(insecure ? { requestTls: { rejectUnauthorized: false } } : {}),
+        })
+      : new Agent({
+          keepAliveTimeout: 60_000,
+          keepAliveMaxTimeout: 600_000,
+          connect,
+        });
+    proxyDispatchers.set(key, dispatcher);
   }
 
-  return proxyDispatchers.get(normalized);
+  return proxyDispatchers.get(key);
+}
+
+async function fetchWithTlsFallback(url, options, proxyUrl) {
+  try {
+    const tuned = getTunedAgent();
+    const defaultDispatcher = (tuned && typeof tuned.dispatch === "function" && !options.dispatcher) ? tuned : undefined;
+    const dispatcher = proxyUrl ? await getDispatcher(proxyUrl) : defaultDispatcher;
+    return await originalFetch(url, dispatcher ? { ...options, dispatcher } : options);
+  } catch (err) {
+    const isStrictSsl = process.env.STRICT_SSL === "true" || process.env.STRICT_SSL === "1";
+    if (!isStrictSsl && isTlsCertError(err)) {
+      if (options.body && typeof options.body.getReader === "function" && options.body.locked) {
+        throw err;
+      }
+      // ponytail: in-memory insecure agent fallback for self-signed MITM corporate/antivirus certs
+      console.warn(`[ProxyFetch] TLS cert verification failed (${err.cause?.code || err.code}), retrying with insecure TLS: ${url}`);
+      const insecureDispatcher = await getDispatcher(proxyUrl, true);
+      return await originalFetch(url, { ...options, dispatcher: insecureDispatcher });
+    }
+    throw err;
+  }
 }
 
 /**
@@ -388,8 +433,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     if (proxyUrl) {
       // Proxy resolves DNS externally (not affected by /etc/hosts) — use proxy directly
       try {
-        const dispatcher = await getDispatcher(proxyUrl);
-        return await originalFetch(url, { ...options, dispatcher });
+        return await fetchWithTlsFallback(url, options, proxyUrl);
       } catch (proxyError) {
         options.signal?.throwIfAborted();
         if (proxyOptions?.strictProxy === true) {
@@ -411,8 +455,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
 
   if (proxyUrl) {
     try {
-      const dispatcher = await getDispatcher(proxyUrl);
-      return await originalFetch(url, { ...options, dispatcher });
+      return await fetchWithTlsFallback(url, options, proxyUrl);
     } catch (proxyError) {
       options.signal?.throwIfAborted();
       // If strictProxy is enabled, fail hard instead of falling back to direct
@@ -420,20 +463,31 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
         throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
       }
       console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
-      const fallbackAgent = getTunedAgent();
-      if (fallbackAgent && typeof fallbackAgent.dispatch === "function" && !options.dispatcher) {
-        return originalFetch(url, { ...options, dispatcher: fallbackAgent });
-      }
-      return originalFetch(url, options);
+      return fetchWithTlsFallback(url, options, null);
     }
   }
 
-  // got-scraping disabled — use native fetch directly with tuned keep-alive dispatcher
-  const tunedAgent = getTunedAgent();
-  if (tunedAgent && typeof tunedAgent.dispatch === "function" && !options.dispatcher) {
-    return originalFetch(url, { ...options, dispatcher: tunedAgent });
+  // Strict mode means "never leave over the direct IP". Reaching here with a
+  // proxy configured but unresolved is exactly that case — an inactive or
+  // empty pool, or every proxy removed — so refuse instead of silently
+  // exposing the real address (#4333). The catch blocks above only cover a
+  // proxy that was actually tried.
+  //
+  // Gate on a proxy being *intended*: callers like the Qoder executor set
+  // strictProxy to mean "do not replay this request directly if the proxy
+  // fails" (a replayed COSY signature returns 403), not "a proxy is required".
+  // With nothing configured they must keep working.
+  const proxyIntended = proxyOptions?.proxyPoolId
+    || proxyOptions?.enabled === true
+    || proxyOptions?.connectionProxyEnabled === true
+    || !!normalizeString(proxyOptions?.url ?? proxyOptions?.connectionProxyUrl);
+  if (proxyOptions?.strictProxy === true && proxyIntended) {
+    throw new Error("[ProxyFetch] Proxy required but none resolved (strictProxy=true)");
   }
-  return originalFetch(url, options);
+
+  // got-scraping disabled — use native fetch directly
+  // (Re-enable per-host by wrapping with tryGotScrapingFetch when needed)
+  return fetchWithTlsFallback(url, options, null);
 }
 
 /**
