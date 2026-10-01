@@ -188,7 +188,16 @@ export function createSSEStream(options = {}) {
               !trimmed.includes('"partial_json"') &&
               !trimmed.includes('"tool_use"');
 
-            if (isPureContentDelta || isPureClaudeDelta) {
+            const isPureGeminiDelta =
+              trimmed.includes('"candidates"') &&
+              trimmed.includes('"parts"') &&
+              trimmed.includes('"text":') &&
+              !trimmed.includes('"finishReason"') &&
+              !trimmed.includes('"functionCall"') &&
+              !trimmed.includes('"thought":true') &&
+              !trimmed.includes('"usageMetadata"');
+
+            if (isPureContentDelta || isPureClaudeDelta || isPureGeminiDelta) {
               const matchRegex = isPureContentDelta
                 ? /"content":"((?:[^"\\]|\\.)*)"/
                 : /"text":"((?:[^"\\]|\\.)*)"/;

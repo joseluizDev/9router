@@ -252,7 +252,7 @@ export class AntigravityExecutor extends BaseExecutor {
             ...fn,
             name,
             parameters: fn.parameters
-              ? cleanJSONSchemaForAntigravity(structuredClone(fn.parameters))
+              ? cleanJSONSchemaForAntigravity(fn.parameters)
               : { type: "object", properties: { reason: { type: "string", description: "Brief explanation" } }, required: ["reason"] }
           });
         }

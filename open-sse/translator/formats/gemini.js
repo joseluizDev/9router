@@ -42,6 +42,8 @@ export const UNSUPPORTED_SCHEMA_CONSTRAINTS = [
   "minProperties", "maxProperties"
 ];
 
+export const UNSUPPORTED_SCHEMA_CONSTRAINTS_SET = new Set(UNSUPPORTED_SCHEMA_CONSTRAINTS);
+
 // Default safety settings
 export const DEFAULT_SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
@@ -154,8 +156,9 @@ function removeUnsupportedKeywords(obj, keywords) {
     return;
   }
 
+  const isSet = keywords instanceof Set;
   for (const key of Object.keys(obj)) {
-    if (keywords.includes(key) || key.startsWith("x-")) {
+    if ((isSet ? keywords.has(key) : keywords.includes(key)) || key.startsWith("x-")) {
       delete obj[key];
       continue;
     }
@@ -355,12 +358,24 @@ function ensureArrayItems(obj) {
   for (const v of Object.values(obj)) if (v && typeof v === "object") ensureArrayItems(v);
 }
 
+const schemaCache = new Map();
+const MAX_SCHEMA_CACHE = 256;
+
 // Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
 export function cleanJSONSchemaForAntigravity(schema) {
   if (!schema || typeof schema !== "object") return schema;
 
-  // Mutate directly (schema is only used once per request)
-  let cleaned = schema;
+  let cacheKey = null;
+  try {
+    cacheKey = JSON.stringify(schema);
+    const cached = schemaCache.get(cacheKey);
+    if (cached) {
+      return structuredClone(cached);
+    }
+  } catch {}
+
+  // Clone only on cache miss to avoid redundant clones on repeat requests
+  let cleaned = structuredClone(schema);
 
   // Phase 1: Convert and prepare
   convertConstToEnum(cleaned);
@@ -378,7 +393,7 @@ export function cleanJSONSchemaForAntigravity(schema) {
   ensureArrayItems(cleaned);
 
   // Phase 3: Remove all unsupported keywords at ALL levels (including inside arrays)
-  removeUnsupportedKeywords(cleaned, UNSUPPORTED_SCHEMA_CONSTRAINTS);
+  removeUnsupportedKeywords(cleaned, UNSUPPORTED_SCHEMA_CONSTRAINTS_SET);
 
   // Phase 4: Cleanup required fields recursively
   function cleanupRequired(obj) {
@@ -455,6 +470,14 @@ export function cleanJSONSchemaForAntigravity(schema) {
   }
 
   addPlaceholders(cleaned);
+
+  if (cacheKey) {
+    if (schemaCache.size >= MAX_SCHEMA_CACHE) {
+      const oldestKey = schemaCache.keys().next().value;
+      schemaCache.delete(oldestKey);
+    }
+    schemaCache.set(cacheKey, structuredClone(cleaned));
+  }
 
   return cleaned;
 }

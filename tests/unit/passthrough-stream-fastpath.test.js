@@ -127,4 +127,32 @@ describe("passthrough stream fast-path", () => {
       completion_tokens: 5
     }));
   });
+
+  it("processes Gemini format pure text deltas and preserves content accumulation", async () => {
+    let completedContent = null;
+
+    const stream = createPassthroughStreamWithLogger(
+      "antigravity",
+      null,
+      "gemini-3.8-flash-high",
+      "conn-1",
+      null,
+      (accumulated) => {
+        completedContent = accumulated.content;
+      }
+    );
+
+    const inputChunks = [
+      'data: {"response":{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}}\n\n',
+      'data: {"response":{"candidates":[{"content":{"parts":[{"text":" from Antigravity!"}]}}]}}\n\n',
+      'data: [DONE]\n\n'
+    ];
+
+    const output = await readStream(stream, inputChunks);
+
+    expect(output).toContain('"text":"Hello"');
+    expect(output).toContain('"text":" from Antigravity!"');
+    expect(output).toContain('data: [DONE]');
+    expect(completedContent).toBe("Hello from Antigravity!");
+  });
 });

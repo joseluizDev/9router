@@ -286,7 +286,9 @@ async function getDispatcher(proxyUrl, insecure = false) {
     if (proxyDispatchers.size >= MEMORY_CONFIG.proxyDispatchersMaxSize) {
       proxyDispatchers.delete(proxyDispatchers.keys().next().value);
     }
-    const { Agent, ProxyAgent } = await import("undici");
+    const undici = await import("undici");
+    const Agent = undici.Agent || class {};
+    const ProxyAgent = undici.ProxyAgent || class {};
     const connect = insecure ? { rejectUnauthorized: false, noDelay: true } : { noDelay: true };
     const dispatcher = normalized
       ? new ProxyAgent({
@@ -358,6 +360,8 @@ async function createBypassRequest(parsedUrl, realIP, options) {
     socket.once("close", () => { if (!req) cleanup(); });
 
     socket.connect(HTTPS_PORT, realIP, () => {
+      socket.setNoDelay?.(true);
+      socket.setKeepAlive?.(true, 60_000);
       if (signal?.aborted) return;
       const reqOptions = {
         socket,

@@ -26,7 +26,7 @@ vi.mock("https", () => ({ default: { request: (options, callback) => {
   transport.requests.push(req);
   return req;
 } } }));
-vi.mock("undici", () => ({ ProxyAgent: class {} }));
+vi.mock("undici", () => ({ ProxyAgent: class {}, Agent: class {}, setGlobalDispatcher: () => {} }));
 
 const url = "https://cloudcode-pa.googleapis.com/v1/test";
 let fetchRequest;

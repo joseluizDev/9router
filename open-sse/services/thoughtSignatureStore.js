@@ -28,8 +28,16 @@ function isCompatible(entry, family) {
   return !entry.family || !family || entry.family === family;
 }
 
-function pruneMemoryExpired() {
+let lastPruneAt = 0;
+const PRUNE_INTERVAL_MS = 60_000;
+
+function pruneMemoryExpired(force = false) {
   const now = Date.now();
+  if (!force && now - lastPruneAt < PRUNE_INTERVAL_MS && memorySignatures.size <= MAX_SIGNATURES) {
+    return;
+  }
+  lastPruneAt = now;
+
   for (const [key, value] of memorySignatures.entries()) {
     if (value.expiresAt <= now) {
       memorySignatures.delete(key);
