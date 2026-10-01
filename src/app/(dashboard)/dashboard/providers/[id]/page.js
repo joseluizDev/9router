@@ -23,7 +23,6 @@ import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
-import AntigravityCliModal from "./AntigravityCliModal";
 import CustomConfigCard from "./CustomConfigCard";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
@@ -79,10 +78,6 @@ export default function ProviderDetailPage() {
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
-  const [showAntigravityCliModal, setShowAntigravityCliModal] = useState(false);
-  const [antigravityCliStatus, setAntigravityCliStatus] = useState(null);
-  const [importingLocalConfig, setImportingLocalConfig] = useState(false);
-  const [localImportMessage, setLocalImportMessage] = useState(null);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
   const [oneByOneStopping, setOneByOneStopping] = useState(false);
   const [oneByOneCurrentConnectionId, setOneByOneCurrentConnectionId] = useState(null);
@@ -835,73 +830,6 @@ export default function ProviderDetailPage() {
     setShowOAuthModal(false);
   };
 
-  const fetchAntigravityCliStatus = useCallback(async () => {
-    if (providerId !== "antigravity") return;
-    try {
-      const res = await fetch("/api/oauth/antigravity/cli");
-      if (res.ok) {
-        const data = await res.json();
-        setAntigravityCliStatus(data);
-      }
-    } catch {
-      // ignore
-    }
-  }, [providerId]);
-
-  useEffect(() => {
-    if (providerId === "antigravity") {
-      fetchAntigravityCliStatus();
-    }
-  }, [providerId, fetchAntigravityCliStatus]);
-
-  const handleAntigravityCliLogout = async () => {
-    try {
-      setImportingLocalConfig(true);
-      const res = await fetch("/api/oauth/antigravity/cli", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "logout" }),
-      });
-      if (res.ok) {
-        await fetchAntigravityCliStatus();
-        await fetchConnections();
-        setLocalImportMessage({ type: "success", text: "Antigravity CLI deslogado com sucesso do servidor." });
-      }
-    } catch (err) {
-      setLocalImportMessage({ type: "error", text: err.message });
-    } finally {
-      setImportingLocalConfig(false);
-    }
-  };
-
-  const handleLocalAntigravityImport = async () => {
-    if (importingLocalConfig) return;
-    setImportingLocalConfig(true);
-    setLocalImportMessage(null);
-    try {
-      const res = await fetch("/api/oauth/antigravity/local-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to import local credentials");
-      await fetchConnections();
-      await fetchAntigravityCliStatus();
-      const accountEmail = data.connection?.email || data.connection?.name || "";
-      setLocalImportMessage({
-        type: "success",
-        text: accountEmail
-          ? `Antigravity CLI account imported: ${accountEmail}`
-          : "Antigravity CLI credentials imported successfully."
-      });
-    } catch (error) {
-      setLocalImportMessage({ type: "error", text: error.message });
-    } finally {
-      setImportingLocalConfig(false);
-    }
-  };
-
   const handleIFlowCookieSuccess = () => {
     fetchConnections();
     setShowIFlowCookieModal(false);
@@ -1141,9 +1069,6 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onDelete={() => handleDelete(conn.id)}
-                onUnlock={(updated) => {
-                  setConnections(prev => prev.map(c => c.id === conn.id ? { ...c, ...updated } : c));
-                }}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
@@ -1659,28 +1584,6 @@ export default function ProviderDetailPage() {
             </div>
           </div>
 
-          {localImportMessage && (
-            <div className={`mb-4 rounded-lg border px-3 py-2 text-xs flex items-center justify-between ${
-              localImportMessage.type === "error"
-                ? "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400"
-                : "border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400"
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[16px]">
-                  {localImportMessage.type === "error" ? "error" : "check_circle"}
-                </span>
-                <span>{localImportMessage.text}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setLocalImportMessage(null)}
-                className="hover:opacity-70 text-text-muted"
-              >
-                <span className="material-symbols-outlined text-[14px]">close</span>
-              </button>
-            </div>
-          )}
-
           {connections.length === 0 ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
@@ -1722,31 +1625,6 @@ export default function ProviderDetailPage() {
                       <Button size="sm" icon="playlist_add" variant="secondary" onClick={() => setShowBulkImportGrokCli(true)}>
                         {translate("Bulk Add")}
                       </Button>
-                    )}
-                    {providerId === "antigravity" && (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          icon="terminal"
-                          variant="secondary"
-                          onClick={() => setShowAntigravityCliModal(true)}
-                          title="Fazer Login na CLI do Antigravity / Google ADC diretamente pelo site"
-                        >
-                          Login CLI
-                        </Button>
-                        {antigravityCliStatus?.installed && (
-                          <Button
-                            size="sm"
-                            icon="logout"
-                            variant="danger"
-                            onClick={handleAntigravityCliLogout}
-                            disabled={importingLocalConfig}
-                            title="Desconectar / Limpar credenciais CLI da máquina"
-                          >
-                            Deslogar CLI
-                          </Button>
-                        )}
-                      </div>
                     )}
                     <Button
                       size="sm"
@@ -1829,33 +1707,6 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
-                  {providerId === "antigravity" && (
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <Button
-                        size="sm"
-                        icon="terminal"
-                        variant="secondary"
-                        onClick={() => setShowAntigravityCliModal(true)}
-                        title="Fazer Login na CLI do Antigravity / Google ADC diretamente pelo site"
-                        className="w-full sm:w-auto"
-                      >
-                        Login CLI
-                      </Button>
-                      {antigravityCliStatus?.installed && (
-                        <Button
-                          size="sm"
-                          icon="logout"
-                          variant="danger"
-                          onClick={handleAntigravityCliLogout}
-                          disabled={importingLocalConfig}
-                          title="Desconectar / Limpar credenciais CLI da máquina"
-                          className="w-full sm:w-auto"
-                        >
-                          Deslogar CLI
-                        </Button>
-                      )}
-                    </div>
-                  )}
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1889,14 +1740,6 @@ export default function ProviderDetailPage() {
                 </div>
               )}
             </>
-          )}
-          {localImportMessage && (
-            <div className={`mt-3 flex items-start gap-2 rounded px-2 py-1.5 text-xs ${localImportMessage.type === "success" ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"}`}>
-              <span className="material-symbols-outlined text-[14px] mt-0.5">
-                {localImportMessage.type === "success" ? "check_circle" : "error"}
-              </span>
-              <span>{localImportMessage.text}</span>
-            </div>
           )}
         </Card>
       )}
@@ -2097,18 +1940,6 @@ export default function ProviderDetailPage() {
           isOpen={showBulkImportGrokCli}
           onClose={() => setShowBulkImportGrokCli(false)}
           onSuccess={fetchConnections}
-        />
-      )}
-
-      {providerId === "antigravity" && (
-        <AntigravityCliModal
-          isOpen={showAntigravityCliModal}
-          onClose={() => setShowAntigravityCliModal(false)}
-          onSuccess={async () => {
-            await fetchConnections();
-            await fetchAntigravityCliStatus();
-            setShowAntigravityCliModal(false);
-          }}
         />
       )}
 

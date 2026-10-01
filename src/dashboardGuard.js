@@ -45,7 +45,6 @@ const ALWAYS_PROTECTED = [
   "/api/version/update",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
-  "/api/oauth/antigravity/local-import",
   "/api/oauth/zed/auto-import",
 ];
 
