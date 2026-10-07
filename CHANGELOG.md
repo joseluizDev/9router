@@ -2,6 +2,7 @@
 
 ## Fixes
 - **Claude streaming**: preserve signature, citation, and empty delta events so passthrough never drops their JSON payload while forwarding the SSE event header.
+- **Claude streaming**: send `ping` events every 15s (`CLAUDE_STREAM_PING_INTERVAL_MS`) on translated streams so Claude Code does not abort after 180s of silence while GPT/Codex models reason or buffer tool arguments.
 
 # v0.5.95 (2026-10-01)
 

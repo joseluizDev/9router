@@ -1,4 +1,5 @@
 import { appendRequestLog, trackPendingRequest } from "@/lib/usageDb.js";
+import { CLAUDE_STREAM_PING_INTERVAL_MS } from "../config/runtimeConfig.js";
 import { FORMATS } from "../translator/formats.js";
 import { initState, translateResponse } from "../translator/index.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
@@ -88,10 +89,13 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
   let completionFlushTimer = null;
+  let pingTimer = null;
+  const stopPing = () => { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } };
 
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
   const finalizeStream = () => {
+    stopPing();
     if (completionFlushTimer) { clearTimeout(completionFlushTimer); completionFlushTimer = null; }
     if (finalized) return;
     finalized = true;
@@ -133,6 +137,21 @@ export function createSSEStream(options = {}) {
   };
 
   return new TransformStream({
+    // Only translated streams: passthrough forwards lines one by one, so a ping
+    // could land between an upstream event: line and its data: line.
+    start(controller) {
+      if (mode !== STREAM_MODE.TRANSLATE || sourceFormat !== FORMATS.CLAUDE) return;
+      const ping = sharedEncoder.encode(formatSSE({ type: "ping" }, FORMATS.CLAUDE));
+      pingTimer = setInterval(() => {
+        try { controller.enqueue(ping); } catch { stopPing(); }
+      }, CLAUDE_STREAM_PING_INTERVAL_MS);
+    },
+
+    cancel() {
+      stopPing();
+      if (completionFlushTimer) { clearTimeout(completionFlushTimer); completionFlushTimer = null; }
+    },
+
     transform(chunk, controller) {
       if (!ttftAt) ttftAt = Date.now();
       const text = decoder.decode(chunk, { stream: true });
