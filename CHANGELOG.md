@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Claude streaming**: preserve signature, citation, and empty delta events so passthrough never drops their JSON payload while forwarding the SSE event header.
+
 # v0.5.95 (2026-10-01)
 
 ## Features

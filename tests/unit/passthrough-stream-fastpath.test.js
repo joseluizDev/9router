@@ -128,6 +128,28 @@ describe("passthrough stream fast-path", () => {
     }));
   });
 
+  it.each([
+    { type: "signature_delta", signature: "sig_abc" },
+    { type: "citations_delta", citation: { type: "char_location", document_index: 0, document_title: "Source", start_char_index: 0, end_char_index: 4, cited_text: "text" } },
+    { type: "thinking_delta", thinking: "" },
+    { type: "text_delta", text: "" },
+    { type: "input_json_delta", partial_json: "" },
+  ])("preserves Claude $type event data across chunk boundaries", async (delta) => {
+    const stream = createPassthroughStreamWithLogger("claude");
+    const event = { type: "content_block_delta", index: 0, delta };
+    const data = `data: ${JSON.stringify(event)}\n\n`;
+    const output = await readStream(stream, [
+      "event: content_block_delta\n",
+      data.slice(0, 20),
+      data.slice(20),
+    ]);
+
+    const frame = output.split("\n\n")[0];
+    const payload = frame.split("\n").find(line => line.startsWith("data: "));
+    expect(payload).toBeDefined();
+    expect(JSON.parse(payload.slice(6))).toEqual(event);
+  });
+
   it("processes Gemini format pure text deltas and preserves content accumulation", async () => {
     let completedContent = null;
 

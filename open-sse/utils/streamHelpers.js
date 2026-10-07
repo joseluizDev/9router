@@ -49,20 +49,8 @@ export function hasValuableContent(chunk, format) {
            delta.role;
   }
 
-  // Claude format
-  if (format === FORMATS.CLAUDE) {
-    const isContentBlockDelta = chunk.type === "content_block_delta";
-    const hasText = chunk.delta?.text && chunk.delta.text !== "";
-    const hasThinking = chunk.delta?.thinking && chunk.delta.thinking !== "";
-    const hasInputJson = chunk.delta?.partial_json && chunk.delta.partial_json !== "";
-    
-    if (isContentBlockDelta && !hasText && !hasThinking && !hasInputJson) {
-      return false;
-    }
-    return true;
-  }
-
-  return true; // Other formats: keep all chunks
+  // Claude deltas carry signatures/citations too; dropping their data leaves orphan SSE event headers.
+  return true;
 }
 
 // Fix invalid id (generic or too short)
