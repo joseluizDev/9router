@@ -1,15 +1,16 @@
-import { convertResponsesStreamToJson } from "../../transformer/streamToJsonConverter.js";
-import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
-import { createErrorResult } from "../../utils/error.js";
-import { HTTP_STATUS } from "../../config/runtimeConfig.js";
-import { FORMATS } from "../../translator/formats.js";
+import { saveRequestDetail } from "@/lib/usageDb.js";
 import { PROVIDERS } from "../../config/providers.js";
-import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
-import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { HTTP_STATUS } from "../../config/runtimeConfig.js";
+import { convertResponsesStreamToJson } from "../../transformer/streamToJsonConverter.js";
+import { FORMATS } from "../../translator/formats.js";
+import { RESPONSES_ITEM, ROLE } from "../../translator/schema/index.js";
+import { createErrorResult } from "../../utils/error.js";
+import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
+import { openAICompletionToClaudeMessage } from "./claudeResponseHelper.js";
+import { buildRequestDetail, extractRequestConfig, formatDoneLine, saveUsageStats } from "./requestDetail.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
-import { saveRequestDetail, appendRequestLog } from "@/lib/usageDb.js";
 
 function textFromResponsesMessageItem(item) {
   if (!item?.content || !Array.isArray(item.content)) return "";
@@ -213,7 +214,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       const inTokensForLog = (usage.input_tokens || 0)
         + (usage.cache_read_input_tokens || usage.cached_tokens || 0)
         + (usage.cache_creation_input_tokens || 0);
-      const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
+      const { textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
       const totalLatency = Date.now() - requestStartTime;
 
       saveRequestDetail(buildRequestDetail({
@@ -267,6 +268,17 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
             responseId: jsonResponse.id || `resp_${Date.now()}`
           }
         };
+      } else if (sourceFormat === FORMATS.CLAUDE) {
+        const message = { role: "assistant", content: textContent || (hasToolCalls ? null : "") };
+        if (hasToolCalls) message.tool_calls = toolCalls;
+        finalResp = openAICompletionToClaudeMessage({
+          id: jsonResponse.id || `chatcmpl-${Date.now()}`,
+          object: "chat.completion",
+          created: jsonResponse.created_at || Math.floor(Date.now() / 1000),
+          model: jsonResponse.model || model,
+          choices: [{ index: 0, message, finish_reason: hasToolCalls ? "tool_calls" : "stop" }],
+          usage: { prompt_tokens: inTokens, completion_tokens: outTokens, total_tokens: inTokens + outTokens, ...cacheDetails }
+        });
       } else {
         const message = { role: "assistant", content: textContent || (hasToolCalls ? null : "") };
         if (hasToolCalls) message.tool_calls = toolCalls;
@@ -358,7 +370,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // already imports parseSSEToOpenAIResponse from this module.
     const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
       ? chatCompletionToResponses(parsed, customToolNames)
-      : parsed;
+      : (sourceFormat === FORMATS.CLAUDE ? openAICompletionToClaudeMessage(parsed) : parsed);
 
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(finalBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {

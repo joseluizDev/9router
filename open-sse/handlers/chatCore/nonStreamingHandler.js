@@ -1,68 +1,18 @@
+import { saveRequestDetail } from "@/lib/usageDb.js";
+import { HTTP_STATUS } from "../../config/runtimeConfig.js";
+import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
 import { FORMATS } from "../../translator/formats.js";
 import { needsTranslation } from "../../translator/index.js";
-import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
-import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
-import { createErrorResult } from "../../utils/error.js";
-import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
-import { HTTP_STATUS } from "../../config/runtimeConfig.js";
-import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
-import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
-import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
-import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
+import { RESPONSES_ITEM, ROLE } from "../../translator/schema/index.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
+import { createErrorResult } from "../../utils/error.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
-import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
-
-function parseToolArguments(value) {
-  if (!value) return {};
-  if (typeof value === "object") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-}
-
-function openAICompletionToClaudeMessage(responseBody) {
-  if (!responseBody?.choices?.[0]) return responseBody;
-  const choice = responseBody.choices[0];
-  const message = choice.message || {};
-  const content = [];
-
-  const reasoning = message.reasoning_content || message.provider_specific_fields?.reasoning_content || "";
-  if (reasoning) {
-    content.push({ type: "thinking", thinking: reasoning });
-  }
-  if (typeof message.content === "string" && message.content.length > 0) {
-    content.push({ type: "text", text: message.content });
-  }
-  for (const toolCall of message.tool_calls || []) {
-    const fn = toolCall.function || {};
-    content.push({
-      type: "tool_use",
-      id: toolCall.id || `toolu_${Date.now()}_${content.length}`,
-      name: fn.name || toolCall.name || "",
-      input: parseToolArguments(fn.arguments || toolCall.arguments),
-    });
-  }
-  if (content.length === 0) content.push({ type: "text", text: "" });
-
-  const usage = responseBody.usage || {};
-  return {
-    id: String(responseBody.id || `msg_${Date.now()}`).replace(/^chatcmpl-/, ""),
-    type: "message",
-    role: "assistant",
-    model: responseBody.model || "unknown",
-    content,
-    stop_reason: fromOpenAIFinish(choice.finish_reason, FORMATS.CLAUDE),
-    stop_sequence: null,
-    usage: {
-      input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
-      output_tokens: usage.completion_tokens || usage.output_tokens || 0,
-    },
-  };
-}
+import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
+import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
+import { openAICompletionToClaudeMessage } from "./claudeResponseHelper.js";
+import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, formatDoneLine, saveUsageStats } from "./requestDetail.js";
+import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 
 /**
  * Convert an OpenAI Chat Completions non-streaming response body into the
@@ -214,11 +164,14 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
         result.usage.completion_tokens_details = { reasoning_tokens: usage.thoughtsTokenCount };
       }
     }
+    if (sourceFormat === FORMATS.CLAUDE) return openAICompletionToClaudeMessage(result);
+    if (sourceFormat === FORMATS.OPENAI_RESPONSES) return openAICompletionToResponses(result, customToolNames);
     return result;
   }
 
   // Claude
   if (targetFormat === FORMATS.CLAUDE) {
+    if (sourceFormat === FORMATS.CLAUDE) return responseBody;
     // Always translate a Claude-format body to OpenAI, even if `content` is
     // missing/null (e.g. M3 with max_tokens:1 spends the budget on thinking
     // and returns `content: null`). Returning the raw body would leave the
@@ -228,7 +181,10 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
     // Some providers (e.g. xiaomi-tokenplan) return OpenAI-format responses even when
     // the request was translated to Claude format — the targetFormat is Claude but the
     // actual response is OpenAI-native and needs no further translation.
-    if (responseBody.choices || (responseBody.content && !Array.isArray(responseBody.content))) return responseBody;
+    if (responseBody.choices || (responseBody.content && !Array.isArray(responseBody.content))) {
+      if (sourceFormat === FORMATS.OPENAI_RESPONSES) return openAICompletionToResponses(responseBody, customToolNames);
+      return responseBody;
+    }
 
     let textContent = "", thinkingContent = "";
     const toolCalls = [];
@@ -270,12 +226,16 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
         total_tokens: (responseBody.usage.input_tokens || 0) + (responseBody.usage.output_tokens || 0)
       };
     }
+    if (sourceFormat === FORMATS.OPENAI_RESPONSES) return openAICompletionToResponses(result, customToolNames);
     return result;
   }
 
   // Ollama
   if (targetFormat === FORMATS.OLLAMA) {
-    return ollamaBodyToOpenAI(responseBody);
+    const openAI = ollamaBodyToOpenAI(responseBody);
+    if (sourceFormat === FORMATS.CLAUDE) return openAICompletionToClaudeMessage(openAI);
+    if (sourceFormat === FORMATS.OPENAI_RESPONSES) return openAICompletionToResponses(openAI, customToolNames);
+    return openAI;
   }
 
   return responseBody;
