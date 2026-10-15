@@ -1,5 +1,6 @@
-import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
-import { FORMATS } from "../../translator/formats.js";
+import { FORMATS } from "../formats.js";
+import { fromOpenAIFinish } from "./finishReason.js";
+import { CLAUDE_BLOCK, MODEL_FALLBACK, RESPONSES_ITEM, ROLE } from "../schema/index.js";
 
 function parseToolArguments(value) {
   if (!value) return {};
@@ -11,12 +12,6 @@ function parseToolArguments(value) {
   }
 }
 
-/**
- * Convert an OpenAI Chat Completions non-streaming response body into the
- * Anthropic Claude Messages API shape ({ type: "message", role: "assistant", ... }).
- * Used when a Claude-format client (e.g. Claude Code calling /v1/messages)
- * sends a non-streaming request or retries non-streaming after a stream failure.
- */
 export function openAICompletionToClaudeMessage(responseBody) {
   if (!responseBody?.choices?.[0]) return responseBody;
   const choice = responseBody.choices[0];
@@ -25,24 +20,24 @@ export function openAICompletionToClaudeMessage(responseBody) {
 
   const reasoning = message.reasoning_content || message.provider_specific_fields?.reasoning_content || "";
   if (reasoning) {
-    content.push({ type: "thinking", thinking: reasoning });
+    content.push({ type: CLAUDE_BLOCK.THINKING, thinking: reasoning });
   }
   if (typeof message.content === "string" && message.content.length > 0) {
-    content.push({ type: "text", text: message.content });
+    content.push({ type: CLAUDE_BLOCK.TEXT, text: message.content });
   }
   for (const toolCall of message.tool_calls || []) {
     const fn = toolCall.function || {};
     content.push({
-      type: "tool_use",
+      type: CLAUDE_BLOCK.TOOL_USE,
       id: toolCall.id || `toolu_${Date.now()}_${content.length}`,
       name: fn.name || toolCall.name || "",
       input: parseToolArguments(fn.arguments || toolCall.arguments),
     });
   }
-  if (content.length === 0) content.push({ type: "text", text: "" });
+  if (content.length === 0) content.push({ type: CLAUDE_BLOCK.TEXT, text: "" });
 
   const rawId = String(responseBody.id || `msg_${Date.now()}`);
-  const msgId = rawId.startsWith("msg_") ? rawId : `msg_${rawId.replace(/^chatcmpl-/, "")}`;
+  const msgId = rawId.startsWith("msg_") ? rawId : `msg_${rawId.replace(/^chatcmpl[-_]?/, "")}`;
 
   const usage = responseBody.usage || {};
   const promptTokens = usage.prompt_tokens || usage.input_tokens || 0;
@@ -63,9 +58,9 @@ export function openAICompletionToClaudeMessage(responseBody) {
 
   return {
     id: msgId,
-    type: "message",
-    role: "assistant",
-    model: responseBody.model || "unknown",
+    type: RESPONSES_ITEM.MESSAGE,
+    role: ROLE.ASSISTANT,
+    model: responseBody.model || MODEL_FALLBACK,
     content,
     stop_reason: fromOpenAIFinish(choice.finish_reason, FORMATS.CLAUDE),
     stop_sequence: null,

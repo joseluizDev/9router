@@ -1,6 +1,7 @@
-import { saveRequestDetail } from "@/lib/usageDb.js";
+import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
+import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { FORMATS } from "../../translator/formats.js";
 import { needsTranslation } from "../../translator/index.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
@@ -10,7 +11,6 @@ import { createErrorResult } from "../../utils/error.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
-import { openAICompletionToClaudeMessage } from "./claudeResponseHelper.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, formatDoneLine, saveUsageStats } from "./requestDetail.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 

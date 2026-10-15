@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openAICompletionToClaudeMessage } from "../../open-sse/handlers/chatCore/claudeResponseHelper.js";
+import { openAICompletionToClaudeMessage } from "../../open-sse/translator/concerns/claudeMessage.js";
 import { translateNonStreamingResponse } from "../../open-sse/handlers/chatCore/nonStreamingHandler.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
 import { SSE_HEADERS_CORS } from "../../open-sse/utils/sseConstants.js";
