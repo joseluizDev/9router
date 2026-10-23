@@ -1,15 +1,18 @@
-import { appendRequestLog, trackPendingRequest } from "@/lib/usageDb.js";
-import { CLAUDE_STREAM_PING_INTERVAL_MS } from "../config/runtimeConfig.js";
+import { translateResponse, initState } from "../translator/index.js";
 import { FORMATS } from "../translator/formats.js";
-import { initState, translateResponse } from "../translator/index.js";
+import { PROVIDERS } from "../config/providers.js";
+import { liftReasoningAliases } from "../translator/concerns/reasoning.js";
+import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
+import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
+import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE, ensureStreamToolCallIds } from "./streamHelpers.js";
+import { restoreToolNames } from "./opencodeFingerprint.js";
+import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
-import { formatIncompleteOpenAIResponsesStreamFailure, getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent } from "./responsesStreamHelpers.js";
-import { fixInvalidId, formatSSE, hasValuableContent, parseSSELine } from "./streamHelpers.js";
-import { addBufferToUsage, COLORS, estimateUsage, extractUsage, filterUsageForFormat, hasValidUsage, logUsage, mergeUsage } from "./usageTracking.js";
 
 import { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER } from "./sseConstants.js";
 
-export { COLORS, formatSSE, SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
+export { COLORS, formatSSE };
+export { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
 
 // sharedEncoder is stateless — safe to share across streams
 const sharedEncoder = new TextEncoder();
@@ -61,6 +64,12 @@ export function createSSEStream(options = {}) {
   let buffer = "";
   let usage = null;
 
+  // Tool-call ids already sent to the client, keyed by the tool-call index.
+  // A late fragment that opens a NEW index without an id must not reach the
+  // client as-is: strict OpenAI-compatible SDKs abort the turn on a
+  // tool_call without a string id (#4992).
+  const seenToolCallIds = new Map();
+
   // Per-stream decoder with stream:true to correctly handle multi-byte chars split across chunks
   const decoder = new TextDecoder("utf-8", { fatal: false });
 
@@ -89,13 +98,16 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
   let completionFlushTimer = null;
-  let pingTimer = null;
-  const stopPing = () => { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } };
+
+  // Lane quirk: upstream streams thinking under the OpenRouter aliases
+  // (`reasoning` / `reasoning_details[]`) instead of reasoning_content — OpenCode
+  // Free's MiMo route does. Lift it on every passthrough delta so OpenAI-shaped
+  // clients, the thinking accumulation below and usage accounting see the text.
+  const liftAliases = mode === STREAM_MODE.PASSTHROUGH && !!PROVIDERS[provider]?.quirks?.reasoningAliasFields;
 
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
   const finalizeStream = () => {
-    stopPing();
     if (completionFlushTimer) { clearTimeout(completionFlushTimer); completionFlushTimer = null; }
     if (finalized) return;
     finalized = true;
@@ -137,33 +149,16 @@ export function createSSEStream(options = {}) {
   };
 
   return new TransformStream({
-    // Only translated streams: passthrough forwards lines one by one, so a ping
-    // could land between an upstream event: line and its data: line.
-    start(controller) {
-      if (mode !== STREAM_MODE.TRANSLATE || sourceFormat !== FORMATS.CLAUDE) return;
-      const ping = sharedEncoder.encode(formatSSE({ type: "ping" }, FORMATS.CLAUDE));
-      pingTimer = setInterval(() => {
-        try { controller.enqueue(ping); } catch { stopPing(); }
-      }, CLAUDE_STREAM_PING_INTERVAL_MS);
-    },
-
-    cancel() {
-      stopPing();
-      if (completionFlushTimer) { clearTimeout(completionFlushTimer); completionFlushTimer = null; }
-    },
-
     transform(chunk, controller) {
       if (!ttftAt) ttftAt = Date.now();
       const text = decoder.decode(chunk, { stream: true });
       buffer += text;
       reqLogger?.appendProviderChunk?.(text);
 
-      let startIdx = 0;
-      let newlineIdx;
-      while ((newlineIdx = buffer.indexOf("\n", startIdx)) !== -1) {
-        const line = buffer.slice(startIdx, newlineIdx);
-        startIdx = newlineIdx + 1;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
+      for (const line of lines) {
         const trimmed = line.trim();
         if (isDebugEnabled && trimmed) {
           sseLineCount++;
@@ -185,70 +180,28 @@ export function createSSEStream(options = {}) {
           let responsesTerminal = false;
 
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
-            // Fast-path: detect pure content deltas in OpenAI or Claude format to skip JSON.parse / object allocation
-            const isPureContentDelta =
-              !currentOpenAIResponsesEvent &&
-              trimmed.includes('"chat.completion.chunk"') &&
-              trimmed.includes('"created":') &&
-              (trimmed.includes('"id":"chatcmpl-') || trimmed.includes('"id":"gen-')) &&
-              trimmed.includes('"content":') &&
-              !trimmed.includes('"finish_reason":"') &&
-              !trimmed.includes('"tool_calls"') &&
-              !trimmed.includes('"usage"') &&
-              !trimmed.includes('"prompt_filter_results"') &&
-              !trimmed.includes('"content_filter_results"');
-
-            const isPureClaudeDelta =
-              trimmed.includes('"content_block_delta"') &&
-              trimmed.includes('"text_delta"') &&
-              trimmed.includes('"text":') &&
-              !trimmed.includes('"thinking"') &&
-              !trimmed.includes('"input_json"') &&
-              !trimmed.includes('"partial_json"') &&
-              !trimmed.includes('"tool_use"');
-
-            const isPureGeminiDelta =
-              trimmed.includes('"candidates"') &&
-              trimmed.includes('"parts"') &&
-              trimmed.includes('"text":') &&
-              !trimmed.includes('"finishReason"') &&
-              !trimmed.includes('"functionCall"') &&
-              !trimmed.includes('"thought":true') &&
-              !trimmed.includes('"usageMetadata"');
-
-            if (isPureContentDelta || isPureClaudeDelta || isPureGeminiDelta) {
-              const matchRegex = isPureContentDelta
-                ? /"content":"((?:[^"\\]|\\.)*)"/
-                : /"text":"((?:[^"\\]|\\.)*)"/;
-              const contentMatch = trimmed.match(matchRegex);
-              if (contentMatch && contentMatch[1].length > 0) {
-                let content = contentMatch[1];
-                if (content.includes("\\")) {
-                  try {
-                    content = JSON.parse(`"${content}"`);
-                  } catch {
-                    // keep raw match if parse fails
-                  }
-                }
-                totalContentLength += content.length;
-                accumulatedContent += content;
-
-                if (line.startsWith("data:") && !line.startsWith("data: ")) {
-                  output = "data: " + line.slice(5) + "\n";
-                } else {
-                  output = line + "\n";
-                }
-
-                reqLogger?.appendConvertedChunk?.(output);
-                controller.enqueue(sharedEncoder.encode(output));
-                continue;
-              }
-            }
-
             try {
-              const parsed = JSON.parse(trimmed.slice(5).trim());
+              let parsed = JSON.parse(trimmed.slice(5).trim());
 
               const idFixed = fixInvalidId(parsed);
+
+              // A fragment that opens a new tool-call index without an id breaks
+              // strict OpenAI-compatible clients. Mint/reuse one before the
+              // chunk reaches the client.
+              const toolCallIdFixed = ensureStreamToolCallIds(parsed, seenToolCallIds);
+
+              // The fingerprint pass renames a colliding caller tool to an alias
+              // (read -> read_client). On this path nothing restored it, so the
+              // client received a call to a tool it never declared and answered
+              // "Model tried to call unavailable tool 'read_client'" (#4986).
+              let toolNameRestored = false;
+              if (toolNameMap?.size) {
+                const restored = restoreToolNames(parsed, toolNameMap);
+                if (restored !== parsed) {
+                  parsed = restored;
+                  toolNameRestored = true;
+                }
+              }
 
               // Ensure OpenAI-required fields are present on streaming chunks (Letta compat)
               let fieldsInjected = false;
@@ -271,6 +224,20 @@ export function createSSEStream(options = {}) {
                 }
               }
 
+              // Alias lanes: expose thinking as reasoning_content (additive) before
+              // the valuable-content check, so reasoning-only chunks survive.
+              if (liftAliases && parsed?.choices) {
+                for (const choice of parsed.choices) {
+                  if (choice?.delta) {
+                    const lifted = liftReasoningAliases(choice.delta);
+                    if (lifted !== choice.delta) {
+                      choice.delta = lifted;
+                      fieldsInjected = true;
+                    }
+                  }
+                }
+              }
+
               // Strip empty tool_calls arrays that break AI SDK reasoning tracking.
               // Some providers (e.g. CodeBuddy CN) include `"tool_calls": []` in
               // every streaming delta. @ai-sdk/openai-compatible checks
@@ -285,7 +252,7 @@ export function createSSEStream(options = {}) {
                 }
               }
 
-              if (!hasValuableContent(parsed, parsed?.type ? FORMATS.CLAUDE : FORMATS.OPENAI)) {
+              if (!hasValuableContent(parsed, FORMATS.OPENAI)) {
                 continue;
               }
 
@@ -299,20 +266,6 @@ export function createSSEStream(options = {}) {
               if (reasoning && typeof reasoning === "string") {
                 totalContentLength += reasoning.length;
                 accumulatedThinking += reasoning;
-              }
-
-              // Claude format deltas (thinking, non-fastpath text, etc.)
-              if (parsed?.type === "content_block_delta") {
-                const cText = parsed.delta?.text;
-                if (cText && typeof cText === "string") {
-                  totalContentLength += cText.length;
-                  accumulatedContent += cText;
-                }
-                const cThinking = parsed.delta?.thinking;
-                if (cThinking && typeof cThinking === "string") {
-                  totalContentLength += cThinking.length;
-                  accumulatedThinking += cThinking;
-                }
               }
 
               const extracted = extractUsage(parsed);
@@ -334,7 +287,7 @@ export function createSSEStream(options = {}) {
                 parsed.usage = filterUsageForFormat(buffered, FORMATS.OPENAI);
                 output = `data: ${JSON.stringify(parsed)}\n`;
                 injectedUsage = true;
-              } else if (idFixed || fieldsInjected) {
+              } else if (idFixed || fieldsInjected || toolCallIdFixed || toolNameRestored) {
                 output = `data: ${JSON.stringify(parsed)}\n`;
                 injectedUsage = true;
               }
@@ -513,7 +466,6 @@ export function createSSEStream(options = {}) {
           }, PENDING_COMPLETION_FLUSH_MS);
         }
       }
-      buffer = startIdx > 0 ? buffer.slice(startIdx) : buffer;
     },
 
     flush(controller) {
@@ -648,11 +600,12 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
   });
 }
 
-export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null) {
+export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, toolNameMap = null) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
     provider,
     reqLogger,
+    toolNameMap,
     model,
     connectionId,
     body,

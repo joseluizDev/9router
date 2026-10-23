@@ -1,45 +1,9 @@
 import { Readable } from "stream";
-import { Agent, setGlobalDispatcher } from "undici";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
+import { dbg } from "./debugLog.js";
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
-
-// Global keep-alive agent tuned for AI API traffic (60s keep-alive, TCP_NODELAY)
-let _tunedAgent = null;
-export function getTunedAgent() {
-  if (!_tunedAgent) {
-    try {
-      if (typeof Agent === "function") {
-        _tunedAgent = new Agent({
-          keepAliveTimeout: 60_000,
-          keepAliveMaxTimeout: 600_000,
-          connections: 100,
-          pipelining: 1,
-          connect: {
-            noDelay: true,
-          },
-        });
-        if (typeof setGlobalDispatcher === "function") {
-          try {
-            setGlobalDispatcher(_tunedAgent);
-          } catch {}
-        }
-      } else {
-        _tunedAgent = {};
-      }
-    } catch {
-      _tunedAgent = {};
-    }
-  }
-  return _tunedAgent;
-}
-
-// Warm dispatcher on module load
-try {
-  getTunedAgent();
-} catch {}
-
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -170,8 +134,7 @@ function normalizeString(value) {
 /**
  * Resolve real IP using Google DNS (bypass system DNS)
  */
-async function resolveRealIP(hostname, signal) {
-  signal?.throwIfAborted();
+async function resolveRealIP(hostname) {
   const cached = DNS_CACHE.get(hostname);
   if (cached && Date.now() < cached.expiry) return cached.ip;
 
@@ -181,19 +144,10 @@ async function resolveRealIP(hostname, signal) {
     const resolver = new dns.Resolver();
     resolver.setServers(GOOGLE_DNS_SERVERS);
     const resolve4 = promisify(resolver.resolve4.bind(resolver));
-    const onAbort = () => resolver.cancel();
-    signal?.throwIfAborted();
-    signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      const addresses = await resolve4(hostname);
-      signal?.throwIfAborted();
-      DNS_CACHE.set(hostname, { ip: addresses[0], expiry: Date.now() + MEMORY_CONFIG.dnsCacheTtlMs });
-      return addresses[0];
-    } finally {
-      signal?.removeEventListener("abort", onAbort);
-    }
+    const addresses = await resolve4(hostname);
+    DNS_CACHE.set(hostname, { ip: addresses[0], expiry: Date.now() + MEMORY_CONFIG.dnsCacheTtlMs });
+    return addresses[0];
   } catch (error) {
-    signal?.throwIfAborted();
     console.warn(`[ProxyFetch] DNS resolve failed for ${hostname}:`, error.message);
     return null;
   }
@@ -286,23 +240,11 @@ async function getDispatcher(proxyUrl, insecure = false) {
     if (proxyDispatchers.size >= MEMORY_CONFIG.proxyDispatchersMaxSize) {
       proxyDispatchers.delete(proxyDispatchers.keys().next().value);
     }
-    const undici = await import("undici");
-    const Agent = undici.Agent || class {};
-    const ProxyAgent = undici.ProxyAgent || class {};
-    const connect = insecure ? { rejectUnauthorized: false, noDelay: true } : { noDelay: true };
+    const { Agent, ProxyAgent } = await import("undici");
+    const connect = insecure ? { rejectUnauthorized: false } : undefined;
     const dispatcher = normalized
-      ? new ProxyAgent({
-          uri: normalized,
-          keepAliveTimeout: 60_000,
-          keepAliveMaxTimeout: 600_000,
-          connect: { noDelay: true },
-          ...(insecure ? { requestTls: { rejectUnauthorized: false } } : {}),
-        })
-      : new Agent({
-          keepAliveTimeout: 60_000,
-          keepAliveMaxTimeout: 600_000,
-          connect,
-        });
+      ? new ProxyAgent({ uri: normalized, ...(insecure ? { requestTls: connect } : {}) })
+      : new Agent({ connect });
     proxyDispatchers.set(key, dispatcher);
   }
 
@@ -311,12 +253,13 @@ async function getDispatcher(proxyUrl, insecure = false) {
 
 async function fetchWithTlsFallback(url, options, proxyUrl) {
   try {
-    const tuned = getTunedAgent();
-    const defaultDispatcher = (tuned && typeof tuned.dispatch === "function" && !options.dispatcher) ? tuned : undefined;
-    const dispatcher = proxyUrl ? await getDispatcher(proxyUrl) : defaultDispatcher;
+    // Protocol adapters may need Node's HTTP/1 transport on the direct path.
+    // Keep proxy/no-proxy resolution and strict-proxy enforcement here.
+    if (!proxyUrl && options.directFetch) return await options.directFetch(url, options);
+    const dispatcher = proxyUrl ? await getDispatcher(proxyUrl) : undefined;
     return await originalFetch(url, dispatcher ? { ...options, dispatcher } : options);
   } catch (err) {
-    const isStrictSsl = process.env.STRICT_SSL === "true" || process.env.STRICT_SSL === "1";
+    const isStrictSsl = options.strictTls === true || process.env.STRICT_SSL === "true" || process.env.STRICT_SSL === "1";
     if (!isStrictSsl && isTlsCertError(err)) {
       if (options.body && typeof options.body.getReader === "function" && options.body.locked) {
         throw err;
@@ -340,29 +283,10 @@ async function createBypassRequest(parsedUrl, realIP, options) {
   const https = httpsModule.default ?? httpsModule;
   const net = netModule.default ?? netModule;
 
-  const signal = options.signal;
-  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
-    let req;
-    let incoming;
-    const cleanup = () => signal?.removeEventListener("abort", onAbort);
-    const fail = (error) => {
-      cleanup();
-      reject(error);
-      incoming?.destroy(error);
-      req?.destroy();
-      socket.destroy();
-    };
-    const onAbort = () => fail(signal.reason);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    socket.on("error", fail);
-    socket.once("close", () => { if (!req) cleanup(); });
 
     socket.connect(HTTPS_PORT, realIP, () => {
-      socket.setNoDelay?.(true);
-      socket.setKeepAlive?.(true, 60_000);
-      if (signal?.aborted) return;
       const reqOptions = {
         socket,
         // SNI + cert hostname are validated against the hostname the caller
@@ -380,9 +304,7 @@ async function createBypassRequest(parsedUrl, realIP, options) {
         },
       };
 
-      req = https.request(reqOptions, (res) => {
-        incoming = res;
-        res.once("close", cleanup);
+      const req = https.request(reqOptions, (res) => {
         const response = {
           ok: res.statusCode >= HTTP_SUCCESS_MIN && res.statusCode < HTTP_SUCCESS_MAX,
           status: res.statusCode,
@@ -399,18 +321,18 @@ async function createBypassRequest(parsedUrl, realIP, options) {
         resolve(response);
       });
 
-      req.on("error", fail);
-      req.once("close", () => { if (!incoming) cleanup(); });
+      req.on("error", reject);
       if (options.body) {
         req.write(typeof options.body === "string" ? options.body : JSON.stringify(options.body));
       }
       req.end();
     });
+
+    socket.on("error", reject);
   });
 }
 
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
-  options.signal?.throwIfAborted();
   const targetUrl = typeof url === "string" ? url : url.toString();
 
   // Vercel relay: forward request via relay headers
@@ -439,7 +361,6 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       try {
         return await fetchWithTlsFallback(url, options, proxyUrl);
       } catch (proxyError) {
-        options.signal?.throwIfAborted();
         if (proxyOptions?.strictProxy === true) {
           throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
         }
@@ -449,10 +370,9 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     // No proxy — manually resolve real IP to bypass DNS spoof
     try {
       const parsedUrl = new URL(targetUrl);
-      const realIP = await resolveRealIP(parsedUrl.hostname, options.signal);
+      const realIP = await resolveRealIP(parsedUrl.hostname);
       if (realIP) return await createBypassRequest(parsedUrl, realIP, options);
     } catch (error) {
-      options.signal?.throwIfAborted();
       console.warn(`[ProxyFetch] MITM bypass failed: ${error.message}`);
     }
   }
@@ -461,7 +381,6 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
     try {
       return await fetchWithTlsFallback(url, options, proxyUrl);
     } catch (proxyError) {
-      options.signal?.throwIfAborted();
       // If strictProxy is enabled, fail hard instead of falling back to direct
       if (proxyOptions?.strictProxy === true) {
         throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
