@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_USER_AGENT } from "../shared.js";
+import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_OAUTH_CLIENT } from "../shared.js";
 
 export default {
   id: "antigravity",
@@ -13,8 +13,8 @@ export default {
     notice: {
       signupUrl: "https://antigravity.google",
     },
-    deprecated: false,
-    deprecationNotice: null,
+    deprecated: true,
+    deprecationNotice: "RISK_NOTICE",
   },
   category: "oauth",
   serviceKinds: ["llm", "image", "webSearch"],
@@ -26,16 +26,13 @@ export default {
     },
     retry: {
       "429": {
-        attempts: 1,
-        delayMs: 0,
+        attempts: 3,
       },
       "500": {
-        attempts: 2,
-        delayMs: 500,
+        attempts: 3,
       },
       "503": {
-        attempts: 2,
-        delayMs: 500,
+        attempts: 3,
       },
     },
     usage: {

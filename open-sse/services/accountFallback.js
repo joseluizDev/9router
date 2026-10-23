@@ -1,4 +1,4 @@
-import { BACKOFF_CONFIG, ERROR_RULES, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
@@ -41,15 +41,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, provider
       }
       return { shouldFallback: true, cooldownMs: rule.cooldownMs };
     }
-  }
 
-  // 400 Bad Request / Invalid Argument is a client payload error (e.g. malformed schema or prompt).
-  // Never fallback or lock accounts on 400, which would otherwise cascade-lock every account in the pool.
-  if (status === 400) {
-    return { shouldFallback: false, cooldownMs: 0 };
-  }
-
-  for (const rule of ERROR_RULES) {
     // Status-based rule: match HTTP status code
     if (rule.status && rule.status === status) {
       if (rule.backoff) {

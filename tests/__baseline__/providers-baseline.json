@@ -33,16 +33,13 @@
     },
     "retry": {
       "429": {
-        "attempts": 1,
-        "delayMs": 0
+        "attempts": 3
       },
       "500": {
-        "attempts": 2,
-        "delayMs": 500
+        "attempts": 3
       },
       "503": {
-        "attempts": 2,
-        "delayMs": 500
+        "attempts": 3
       }
     },
     "usage": {
