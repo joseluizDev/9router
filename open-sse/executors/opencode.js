@@ -390,8 +390,16 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   // Free tier moved from /zen/v1 to /inference/v1 (OpenCode v2); /zen/v1 now
   // answers every free request with 403 FreeTierError.
-  buildUrl(model) {
-    const base = this.config.baseUrl;
+  //
+  // Optional local shim: when OPENCODE_SHIM_URL is set (or a connection carries
+  // providerSpecificData.baseUrl), route free requests through it instead of the
+  // upstream. The shim wraps the installed OpenCode CLI, which still holds a
+  // valid Console OAuth session, so it keeps working after the upstream moved
+  // the free lane to require that credential (Bearer public no longer passes).
+  buildUrl(model, stream = true, urlIndex = 0, credentials = null) {
+    const override = credentials?.providerSpecificData?.baseUrl
+      || process.env.OPENCODE_SHIM_URL;
+    const base = (override || this.config?.baseUrl || "https://opencode.ai").replace(/\/$/, "");
     if (isResponsesModel(model)) return `${base}/inference/v1/responses`;
     if (isMessagesModel(model)) return `${base}/inference/v1/messages`;
     return `${base}/inference/v1/chat/completions`;

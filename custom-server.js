@@ -129,6 +129,31 @@ http.createServer = (...args) => {
 };
 
 if (require.main === module) {
+  // Auto-start the local OpenCode shim so free-tier models keep working after
+  // the upstream moved the free lane to require a Console OAuth session
+  // (Bearer public no longer passes). The shim wraps the installed CLI, which
+  // still holds a valid session. Fail-open if the CLI or the shim is missing.
+  try {
+    const cliPath = process.env.OPENCODE_CLI || "/opt/OpenCode/resources/opencode-cli";
+    if (!process.env.OPENCODE_SHIM_URL && fs.existsSync(cliPath) && fs.existsSync(path.join(__dirname, "work", "opencode-shim.mjs"))) {
+      const shimPort = process.env.OPENCODE_SHIM_PORT || "4399";
+      const shimUrl = `http://127.0.0.1:${shimPort}`;
+      const child = require("child_process").spawn(process.execPath, [path.join(__dirname, "work", "opencode-shim.mjs")], {
+        env: { ...process.env, PORT: shimPort, OPENCODE_CLI: cliPath },
+        stdio: "ignore",
+        detached: true,
+      });
+      child.unref();
+      process.env.OPENCODE_SHIM_URL = shimUrl;
+      const stopShim = () => { try { child.kill(); } catch {} };
+      process.once("SIGINT", stopShim);
+      process.once("SIGTERM", stopShim);
+      console.log(`[opencode-shim] auto-started on ${shimUrl}`);
+    }
+  } catch (e) {
+    console.error("[opencode-shim] auto-start failed:", e && e.message ? e.message : e);
+  }
+
   const standalone = path.join(__dirname, "server.js");
   if (fs.existsSync(standalone)) {
     require(standalone);
