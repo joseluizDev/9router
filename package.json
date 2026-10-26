@@ -10,8 +10,6 @@
     "postbuild": "node scripts/copy-standalone-assets.mjs",
     "postbuild:bun": "node scripts/copy-standalone-assets.mjs",
     "start": "node custom-server.js --port 20127",
-    "shim": "node work/opencode-shim.mjs",
-    "shim:start": "OPENCODE_SHIM_URL=http://127.0.0.1:4399 node work/opencode-shim.mjs",
     "dev:bun": "bun --bun next dev --webpack --port 20127",
     "build:bun": "bun --bun next build --webpack",
     "start:bun": "bun ./.next/standalone/custom-server.js",
