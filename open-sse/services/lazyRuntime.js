@@ -11,7 +11,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { getWritableDataDir } from "../utils/writableDataDir.js";
 
@@ -46,6 +45,13 @@ function npmInstall(pkg, version) {
 
 const inflight = new Map();
 
+// The server bundle replaces a static createRequire(...) with undefined, so load
+// it at runtime and keep the native import.
+async function runtimeRequire() {
+  const { createRequire } = await import(/* webpackIgnore: true */ "node:module");
+  return createRequire(path.join(getRuntimeDir(), "package.json"));
+}
+
 async function load(pkg) {
   // 1) Resolvable from the app install (dev machine / traced standalone).
   try {
@@ -54,9 +60,8 @@ async function load(pkg) {
     if (!isModuleMissing(error)) throw error;
   }
   // 2) Already present in the runtime dir from a previous install.
-  const runtimeRequire = createRequire(path.join(getRuntimeDir(), "package.json"));
   try {
-    return await import(pathToFileURL(runtimeRequire.resolve(pkg)).href);
+    return await import(pathToFileURL((await runtimeRequire()).resolve(pkg)).href);
   } catch (error) {
     if (!isModuleMissing(error)) throw error;
   }
@@ -71,7 +76,7 @@ async function load(pkg) {
       `install it manually: cd "${dir}" && npm install ${pkg}@${version}`
     );
   }
-  return import(pathToFileURL(createRequire(path.join(dir, "package.json")).resolve(pkg)).href);
+  return import(pathToFileURL((await runtimeRequire()).resolve(pkg)).href);
 }
 
 export function loadRuntimeDep(pkg) {
