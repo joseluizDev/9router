@@ -1275,5 +1275,10 @@
     "baseUrl": "https://internal.chatuncensored.ai",
     "format": "openai",
     "authType": "cookie"
+  },
+  "zro": {
+    "baseUrl": "https://zro.moonmath.ai/v1/chat/completions",
+    "validateUrl": "https://zro.moonmath.ai/v1/models",
+    "format": "openai"
   }
 }

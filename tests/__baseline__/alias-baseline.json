@@ -276,7 +276,8 @@
     "xiaomi-tokenplan": "xiaomi-tokenplan",
     "xquik": "xquik",
     "youcom": "youcom",
-    "zed": "zd"
+    "zed": "zd",
+    "zro": "zro"
   },
   "modelKeys": [
     "af",
@@ -402,6 +403,7 @@
     "xiaomi-mimo",
     "xiaomi-mimo-tts-models",
     "xiaomi-tokenplan",
-    "zd"
+    "zd",
+    "zro"
   ]
 }
