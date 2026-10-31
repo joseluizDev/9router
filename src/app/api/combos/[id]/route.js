@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { getComboById, updateCombo, deleteCombo, getComboByName } from "@/lib/localDb";
 import { resetComboRotation } from "open-sse/services/combo.js";
-
-// Validate combo name: only a-z, A-Z, 0-9, -, _
-const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+import { VALID_COMBO_NAME_REGEX } from "@/shared/constants/combos";
 
 // GET /api/combos/[id] - Get combo by ID
 export async function GET(request, { params }) {
@@ -30,8 +28,8 @@ export async function PUT(request, { params }) {
     
     // Validate name format if provided
     if (body.name) {
-      if (!VALID_NAME_REGEX.test(body.name)) {
-        return NextResponse.json({ error: "Name can only contain letters, numbers, -, _ and ." }, { status: 400 });
+      if (typeof body.name !== "string" || !VALID_COMBO_NAME_REGEX.test(body.name)) {
+        return NextResponse.json({ error: "Name can only contain letters, numbers, -, _, . and /" }, { status: 400 });
       }
       
       // Check if name already exists (exclude current combo)

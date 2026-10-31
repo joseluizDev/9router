@@ -290,15 +290,12 @@ function comboSeatLimits(combo, combosByName, visiting = new Set()) {
   try {
     for (const seat of Array.isArray(combo?.models) ? combo.models : []) {
       if (typeof seat !== "string") continue;
-      const slash = seat.indexOf("/");
-      if (slash <= 0) {
-        const nested = combosByName.get(seat);
-        if (nested) {
-          const nestedLimits = comboSeatLimits(nested, combosByName, visiting);
-          if (Number.isFinite(nestedLimits.contextWindow)) contextWindow = Math.min(contextWindow, nestedLimits.contextWindow);
-          if (Number.isFinite(nestedLimits.maxOutput)) maxOutput = Math.min(maxOutput, nestedLimits.maxOutput);
-          continue;
-        }
+      const nested = combosByName.get(seat);
+      if (nested) {
+        const nestedLimits = comboSeatLimits(nested, combosByName, visiting);
+        if (Number.isFinite(nestedLimits.contextWindow)) contextWindow = Math.min(contextWindow, nestedLimits.contextWindow);
+        if (Number.isFinite(nestedLimits.maxOutput)) maxOutput = Math.min(maxOutput, nestedLimits.maxOutput);
+        continue;
       }
       const caps = comboSeatCapabilities(seat) || getCapabilitiesForModel(null, seat);
       if (Number.isFinite(caps?.contextWindow)) contextWindow = Math.min(contextWindow, caps.contextWindow);

@@ -69,6 +69,20 @@ describe("/v1/models combo limits", () => {
     });
   });
 
+  it("publishes exact slash combo names and their nested limits", async () => {
+    const models = await modelsWithCombo("opencode-go", "mimo-v2.5", [
+      { name: "ag/", models: ["ocg/mimo-v2.5"] },
+      { name: "team/code", models: ["ag/"] },
+    ]);
+    for (const id of ["ag/", "team/code"]) {
+      expect(models.find((model) => model.id === id)).toMatchObject({
+        context_length: 180000,
+        max_completion_tokens: 16000,
+        capabilities: { contextWindow: 180000, maxOutput: 16000 },
+      });
+    }
+  });
+
   it("publishes Devin CLI's 200k limit for a dv combo seat", async () => {
     const models = await modelsWithCombo("devin-cli", "gpt-5.5-high", [
       { name: "devin-combo", models: ["dv/gpt-5.5-high"] },

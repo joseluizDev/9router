@@ -683,8 +683,8 @@ export const PATTERN_CAPABILITIES = [
 export function aggregateComboCapabilities(comboModels, comboLookup = null, resolveCaps = null, _depth = 0) {
   if (!comboModels?.length || _depth > 6) return null;
   const allCaps = comboModels.map((fullId) => {
-    // Nested combo: bare name (no slash) that exists in the lookup — recurse
-    if (!fullId.includes("/") && comboLookup?.[fullId]) {
+    // Resolve exact combo names before interpreting provider/model prefixes.
+    if (Object.hasOwn(comboLookup || {}, fullId)) {
       return aggregateComboCapabilities(comboLookup[fullId], comboLookup, resolveCaps, _depth + 1)
           ?? resolveCaps?.(fullId)
           ?? getCapabilitiesForModel(null, fullId);

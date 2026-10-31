@@ -431,6 +431,7 @@ describe("App-layer custom transport resolution (stt.js)", () => {
       vi.resetModules();
       vi.doMock(LOCALDB, () => ({
         getSettings: async () => ({ requireApiKey: false }),
+        getComboByName: async () => null,
         getCustomModels: async () => ([{
           providerAlias: "gemini", id: "probe-sttjs-1", type: "stt", transport: "gemini-live",
         }]),

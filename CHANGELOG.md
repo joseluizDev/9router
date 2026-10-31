@@ -1,6 +1,7 @@
 # Unreleased
 
 ## Features
+- **Combos**: allow `/` in user-defined names (including `ag/`), resolve exact combo names before provider/model prefixes, and preserve nested capabilities and access controls. Client-native preset names remain unprefixed.
 - **ZRO (Moonmath)**: add an API-key provider with the five documented models and `auto`, using the existing OpenAI-compatible executor and models-only credential checks. See [setup and security notes](docs/ZRO.md).
 
 # v0.5.112 (2026-10-28)

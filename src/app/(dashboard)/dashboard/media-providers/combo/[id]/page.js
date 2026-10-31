@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Card, Button, Input, Toggle, ModelSelectModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { AI_PROVIDERS, MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
+import { VALID_COMBO_NAME_REGEX } from "@/shared/constants/combos";
 
 // Parse "providerId/model" or just "providerId" → { providerId, model }
 function parseModelEntry(entry) {
@@ -14,8 +15,6 @@ function parseModelEntry(entry) {
   if (idx < 0) return { providerId: entry, model: "" };
   return { providerId: entry.slice(0, idx), model: entry.slice(idx + 1) };
 }
-
-const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 
 const KIND_LABELS = {
   webSearch: "Web Search",
@@ -96,7 +95,7 @@ export default function ComboDetailPage() {
 
   const validateName = (v) => {
     if (!v.trim()) { setNameError("Name is required"); return false; }
-    if (!VALID_NAME_REGEX.test(v)) { setNameError("Only letters, numbers, -, _ and ."); return false; }
+    if (!VALID_COMBO_NAME_REGEX.test(v)) { setNameError("Only letters, numbers, -, _, . and /"); return false; }
     setNameError("");
     return true;
   };
@@ -266,7 +265,7 @@ export default function ComboDetailPage() {
         <div className="flex flex-col gap-4">
           <div>
             <Input label="Combo Name" value={name} onChange={(e) => { setName(e.target.value); validateName(e.target.value); }} onBlur={handleSaveName} error={nameError} />
-            <p className="text-[10px] text-text-muted mt-0.5">Only letters, numbers, -, _ and .</p>
+            <p className="text-[10px] text-text-muted mt-0.5">Only letters, numbers, -, _, . and /</p>
           </div>
           <div className="flex items-center justify-between">
             <div>

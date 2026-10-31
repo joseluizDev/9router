@@ -127,6 +127,14 @@ describe("aggregateComboCapabilities — nested combo resolution via comboLookup
     expect(caps.vision).toBe(true); // mimo brings vision through the lookup
   });
 
+  it("resolves nested combo names containing slashes", () => {
+    const lookup = { "ag/": ["opencode-go/deepseek-v4-pro", "opencode-go/mimo-v2.5"] };
+    const caps = aggregateComboCapabilities(["ag/"], lookup);
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.contextWindow).toBe(1000000);
+  });
+
   it("outer combo gets vision via nested combo containing mimo", () => {
     const lookup = { "deepseek-v4-pro-fusion": ["opencode-go/deepseek-v4-pro", "opencode-go/mimo-v2.5"] };
     const caps = aggregateComboCapabilities(["deepseek-v4-pro-fusion", "openai/gpt-5"], lookup);

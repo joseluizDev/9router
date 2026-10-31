@@ -10,9 +10,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
 import { resolveProviderId, AI_PROVIDERS } from "@/shared/constants/providers";
-
-// Validate combo name: only a-z, A-Z, 0-9, -, _
-const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+import { VALID_COMBO_NAME_REGEX } from "@/shared/constants/combos";
 
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
@@ -1225,8 +1223,8 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
       setNameError("Name is required");
       return false;
     }
-    if (!VALID_NAME_REGEX.test(value)) {
-      setNameError("Only letters, numbers, -, _ and . allowed");
+    if (!VALID_COMBO_NAME_REGEX.test(value)) {
+      setNameError("Only letters, numbers, -, _, . and / allowed");
       return false;
     }
     setNameError("");
@@ -1295,7 +1293,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               error={nameError}
             />
             <p className="text-[10px] text-text-muted mt-0.5">
-              Only letters, numbers, -, _ and . allowed
+              Only letters, numbers, -, _, . and / allowed
             </p>
           </div>
 

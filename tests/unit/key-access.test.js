@@ -96,6 +96,21 @@ describe("restricted: allow by combo", () => {
   });
 });
 
+describe("slash combo access", () => {
+  it("allows only the named combo, not its members or prefix matches", async () => {
+    fx.combos.push({ id: "slash", name: "ag/secure", models: ["openai/model-a"] });
+    key("slash", { restricted: true, allow: ["ag/secure"] });
+    try {
+      expect(await status("sk-slash", "ag/secure")).toBe(200);
+      expect(await status("sk-slash", "ag/secure/other")).toBe(403);
+      expect(await status("sk-slash", "openai/model-a")).toBe(403);
+      expect(await status("sk-empty", "ag/secure")).toBe(403);
+    } finally {
+      fx.combos = fx.combos.filter((combo) => combo.id !== "slash");
+    }
+  });
+});
+
 describe("resolution cannot be used to bypass", () => {
   it("a model alias resolves to its target before matching", async () => {
     expect(await status("sk-b", "fast")).toBe(403); // fast -> openai/model-a
