@@ -213,6 +213,7 @@ async function safeRestartTailscale(reason) {
 
   if (!isTailscaleInstalled()) {
     console.warn(`[Tailscale] safeRestart (${reason}) skipped — Tailscale is not installed`);
+    await updateSettings({ tailscaleEnabled: false, tailscaleUrl: "" }).catch(() => {});
     return;
   }
 

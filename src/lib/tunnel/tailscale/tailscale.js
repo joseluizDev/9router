@@ -9,6 +9,8 @@ import { DATA_DIR } from "@/lib/dataDir.js";
 
 const execAsync = promisify(exec);
 
+const EXTENDED_PATH = `/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin:/snap/bin:${process.env.PATH || ""}`;
+
 const BIN_DIR = path.join(DATA_DIR, "bin");
 const IS_MAC = os.platform() === "darwin";
 const IS_LINUX = os.platform() === "linux";
@@ -312,8 +314,6 @@ export async function installTailscale(sudoPassword, hostname, onProgress) {
   log("Logging in...");
   return startLogin(hostname);
 }
-
-const EXTENDED_PATH = `/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin:/snap/bin:${process.env.PATH || ""}`;
 
 function hasBrew() {
   try { execSync("which brew", { stdio: "ignore", windowsHide: true, env: { ...process.env, PATH: EXTENDED_PATH } }); return true; } catch { return false; }
@@ -876,7 +876,14 @@ export async function provisionCert(hostname) {
 export function stopFunnel() {
   const bin = getTailscaleBin();
   if (!bin) return;
-  try { execSync(`"${bin}" ${SOCKET_FLAG.join(" ")} funnel --bg reset`, { stdio: "ignore", windowsHide: true }); } catch (e) { /* ignore */ }
+  try {
+    execSync(`"${bin}" ${SOCKET_FLAG.join(" ")} funnel --bg reset`, {
+      stdio: "ignore",
+      windowsHide: true,
+      timeout: 3000,
+      env: { ...process.env, PATH: EXTENDED_PATH },
+    });
+  } catch (e) { /* ignore */ }
 }
 
 /** Kill tailscaled daemon (runs as root, needs sudo) */
@@ -894,4 +901,49 @@ export async function stopDaemon(sudoPassword) {
 
   // Cleanup socket
   try { if (fs.existsSync(TAILSCALE_SOCKET)) fs.unlinkSync(TAILSCALE_SOCKET); } catch { /* ignore */ }
+}
+
+/** Force kill tailscale daemon and clean up socket/processes */
+export async function forceKillTailscale() {
+  const bin = getTailscaleBin();
+  if (bin) {
+    try {
+      execSync(`"${bin}" ${SOCKET_FLAG.join(" ")} funnel --bg reset`, {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 2000,
+        env: { ...process.env, PATH: EXTENDED_PATH },
+      });
+    } catch { /* ignore */ }
+    try {
+      execSync(`"${bin}" ${SOCKET_FLAG.join(" ")} down`, {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 2000,
+        env: { ...process.env, PATH: EXTENDED_PATH },
+      });
+    } catch { /* ignore */ }
+  }
+
+  if (IS_WINDOWS) {
+    try { execSync("taskkill /F /IM tailscaled.exe /T 2>nul", { stdio: "ignore", windowsHide: true, timeout: 2000 }); } catch { /* ignore */ }
+    try { execSync("taskkill /F /IM tailscale.exe /T 2>nul", { stdio: "ignore", windowsHide: true, timeout: 2000 }); } catch { /* ignore */ }
+  } else {
+    try { execSync(`pkill -9 -f "tailscaled.*${TAILSCALE_SOCKET}" 2>/dev/null`, { stdio: "ignore", timeout: 2000 }); } catch { /* ignore */ }
+    try { execSync("pkill -9 -f tailscaled 2>/dev/null", { stdio: "ignore", timeout: 2000 }); } catch { /* ignore */ }
+    try { execSync("pkill -9 -f tailscale 2>/dev/null", { stdio: "ignore", timeout: 2000 }); } catch { /* ignore */ }
+  }
+
+  try {
+    if (fs.existsSync(TAILSCALE_SOCKET)) {
+      fs.unlinkSync(TAILSCALE_SOCKET);
+    }
+  } catch { /* ignore */ }
+
+  runningCache.value = false;
+  runningCache.fetchedAt = Date.now();
+  loggedInCache.value = false;
+  loggedInCache.fetchedAt = Date.now();
+  funnelUrlCache.value = null;
+  funnelUrlCache.fetchedAt = Date.now();
 }

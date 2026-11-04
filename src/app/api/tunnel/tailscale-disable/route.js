@@ -3,9 +3,16 @@ import { disableTailscale } from "@/lib/tunnel";
 import { getSettings } from "@/lib/localDb";
 import { configureTunnelMonitoring } from "@/shared/services/initializeApp";
 
-export async function POST() {
+export async function POST(request) {
   try {
-    const result = await disableTailscale();
+    let force = false;
+    try {
+      const body = await request.json();
+      force = body?.force === true;
+    } catch {
+      // Body empty or not JSON
+    }
+    const result = await disableTailscale({ force });
     getSettings()
       .then(configureTunnelMonitoring)
       .catch((error) => console.warn("Tailscale monitor update failed:", error.message));

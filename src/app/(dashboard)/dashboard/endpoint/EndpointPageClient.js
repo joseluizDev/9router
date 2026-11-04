@@ -379,6 +379,12 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) {
         setTunnelEnabled(false);
         setTunnelUrl("");
+        setTunnelPublicUrl("");
+        setTunnelReachable(false);
+        setTunnelEverReachable(false);
+        tunnelEverReachableRef.current = false;
+        tunnelClientReachableRef.current = false;
+        setTunnelChecking(false);
         setShowDisableTunnelModal(false);
         setTunnelStatus({ type: "success", message: "Tunnel disabled" });
       } else {
@@ -583,24 +589,85 @@ export default function APIPageClient({ machineId }) {
     setTsStatus({ type: "error", message: "Timed out waiting for Funnel to be enabled." });
   };
 
-  const handleDisableTailscale = async () => {
+  const handleDisableTailscale = async (force = false) => {
     setTsLoading(true);
     setTsStatus(null);
     try {
-      const res = await fetch("/api/tunnel/tailscale-disable", { method: "POST" });
+      const res = await fetch("/api/tunnel/tailscale-disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
       const data = await res.json();
       if (res.ok) {
         setTsEnabled(false);
         setTsUrl("");
+        setTsConnecting(false);
+        setTsReachable(false);
+        setTsEverReachable(false);
+        tsEverReachableRef.current = false;
+        tsClientReachableRef.current = false;
         setShowDisableTsModal(false);
-        setTsStatus({ type: "success", message: "Tailscale disabled" });
+        setTsStatus({ type: "success", message: force ? "Tailscale encerrado e desativado com sucesso." : "Tailscale disabled" });
       } else {
         setTsStatus({ type: "error", message: data.error || "Failed to disable Tailscale" });
       }
     } catch (e) {
+      if (force) {
+        setTsEnabled(false);
+        setTsUrl("");
+        setTsConnecting(false);
+        setTsReachable(false);
+        setTsEverReachable(false);
+        tsEverReachableRef.current = false;
+        tsClientReachableRef.current = false;
+        setShowDisableTsModal(false);
+      }
       setTsStatus({ type: "error", message: e.message });
     } finally {
       setTsLoading(false);
+    }
+  };
+
+  const handleForceStopTailscale = () => handleDisableTailscale(true);
+
+  const handleForceStopAll = async () => {
+    setTsLoading(true);
+    setTunnelLoading(true);
+    try {
+      await Promise.allSettled([
+        fetch("/api/tunnel/tailscale-disable", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: true }),
+        }),
+        fetch("/api/tunnel/disable", { method: "POST" }),
+      ]);
+      setTsEnabled(false);
+      setTsUrl("");
+      setTsConnecting(false);
+      setTsReachable(false);
+      setTsEverReachable(false);
+      tsEverReachableRef.current = false;
+      tsClientReachableRef.current = false;
+
+      setTunnelEnabled(false);
+      setTunnelUrl("");
+      setTunnelPublicUrl("");
+      setTunnelReachable(false);
+      setTunnelEverReachable(false);
+      tunnelEverReachableRef.current = false;
+      tunnelClientReachableRef.current = false;
+      setTunnelChecking(false);
+
+      setShowDisableTsModal(false);
+      setShowDisableTunnelModal(false);
+      setTsStatus({ type: "success", message: "Todos os túneis foram encerrados e resetados." });
+    } catch (e) {
+      setTsStatus({ type: "error", message: e.message });
+    } finally {
+      setTsLoading(false);
+      setTunnelLoading(false);
     }
   };
 
@@ -732,10 +799,24 @@ export default function APIPageClient({ machineId }) {
     <div className="flex flex-col gap-8">
       {/* Endpoint Card */}
       <Card>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">api</span>
-          API Endpoint
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">api</span>
+            API Endpoint
+          </h2>
+          {(tunnelEnabled || tsEnabled || tunnelChecking || tsLoading || tsConnecting) && (
+            <Button
+              size="sm"
+              variant="danger"
+              icon="power_settings_new"
+              onClick={handleForceStopAll}
+              disabled={tsLoading || tunnelLoading}
+              title="Forçar encerramento e reset de todos os túneis"
+            >
+              Forçar Parada de Túneis
+            </Button>
+          )}
+        </div>
 
         {/* Endpoint rows */}
         <div className="flex flex-col gap-2">
@@ -812,7 +893,7 @@ export default function APIPageClient({ machineId }) {
                   Checking...
                 </div>
                 <button
-                  onClick={() => setTunnelChecking(false)}
+                  onClick={() => { setTunnelChecking(false); handleDisableTunnel(); }}
                   className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
                   title="Stop"
                 >
@@ -867,6 +948,16 @@ export default function APIPageClient({ machineId }) {
                   <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
                   {tsEverReachable ? "Tailscale reconnecting..." : "Tailscale checking..."}
                 </div>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  icon="stop_circle"
+                  onClick={handleForceStopTailscale}
+                  disabled={tsLoading}
+                  title="Forçar Encerramento"
+                >
+                  Forçar Parada
+                </Button>
                 <button
                   onClick={() => setShowDisableTsModal(true)}
                   className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
@@ -890,8 +981,22 @@ export default function APIPageClient({ machineId }) {
                     {tsAuthLabel || "Open"}
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="danger"
+                  icon="stop_circle"
+                  onClick={handleForceStopTailscale}
+                  disabled={tsLoading}
+                  title="Forçar Encerramento"
+                >
+                  Forçar Parada
+                </Button>
                 <button
-                  onClick={() => { setTsLoading(false); setTsConnecting(false); setTsProgress(""); clearUserAuth(); }}
+                  onClick={() => {
+                    handleForceStopTailscale();
+                    setTsProgress("");
+                    clearUserAuth();
+                  }}
                   className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
                   title="Stop"
                 >
@@ -1307,12 +1412,35 @@ export default function APIPageClient({ machineId }) {
         onClose={() => !tsLoading && setShowDisableTsModal(false)}
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-text-muted">Tailscale Funnel will be stopped. Remote access via Tailscale URL will stop working.</p>
-          <div className="flex gap-2">
-            <Button onClick={handleDisableTailscale} fullWidth disabled={tsLoading} variant="danger">
+          <p className="text-sm text-text-muted">
+            Tailscale Funnel will be stopped. Remote access via Tailscale URL will stop working.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              onClick={() => handleDisableTailscale(false)}
+              fullWidth
+              disabled={tsLoading}
+              variant="outline"
+            >
               {tsLoading ? "Disabling..." : "Disable"}
             </Button>
-            <Button onClick={() => setShowDisableTsModal(false)} variant="ghost" fullWidth disabled={tsLoading}>Cancel</Button>
+            <Button
+              onClick={() => handleDisableTailscale(true)}
+              fullWidth
+              disabled={tsLoading}
+              variant="danger"
+              icon="stop_circle"
+            >
+              Forçar Encerramento
+            </Button>
+            <Button
+              onClick={() => setShowDisableTsModal(false)}
+              variant="ghost"
+              fullWidth
+              disabled={tsLoading}
+            >
+              Cancel
+            </Button>
           </div>
         </div>
       </Modal>

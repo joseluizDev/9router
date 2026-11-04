@@ -126,6 +126,12 @@ export async function disableTunnel() {
   // Force-clear flags so a subsequent enable is not blocked by a stuck spawnInProgress
   svc.spawnInProgress = false;
   svc.activeLocalPort = null;
+
+  if (global.__tunnelStatusCache) {
+    global.__tunnelStatusCache.value = null;
+    global.__tunnelStatusCache.fetchedAt = 0;
+  }
+
   return { success: true };
 }
 

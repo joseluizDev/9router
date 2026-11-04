@@ -38,6 +38,7 @@ export {
   installTailscale,
   startLogin,
   startDaemonWithPassword,
+  forceKillTailscale,
   TAILSCALE_SOCKET,
 } from "./tailscale/tailscale.js";
 export { probeUrlAlive as probeTailscaleAlive } from "./tailscale/healthCheck.js";

@@ -1,5 +1,5 @@
 import { loadState, generateShortId } from "../shared/state.js";
-import { startFunnel, stopFunnel, isTailscaleRunning, isTailscaleRunningStrict, isTailscaleLoggedIn, isTailscaleLoggedInStrict, startLogin, startDaemonWithPassword, provisionCert, isTailscaleInstalled } from "./tailscale.js";
+import { startFunnel, stopFunnel, forceKillTailscale, isTailscaleRunning, isTailscaleRunningStrict, isTailscaleLoggedIn, isTailscaleLoggedInStrict, startLogin, startDaemonWithPassword, provisionCert, isTailscaleInstalled } from "./tailscale.js";
 import { waitForHealth } from "./healthCheck.js";
 import { HEALTH_CHECK } from "./config.js";
 import { getSettings, updateSettings } from "@/lib/localDb";
@@ -108,11 +108,33 @@ export async function enableTailscale(localPort = 20128) {
   }
 }
 
-export async function disableTailscale() {
-  console.log("[Tailscale] disable");
+export async function disableTailscale({ force = false } = {}) {
+  console.log(`[Tailscale] disable (force=${force})`);
   svc.cancelToken.cancelled = true;
-  stopFunnel();
+  svc.spawnInProgress = false;
+  svc.activeLocalPort = null;
+
+  try {
+    stopFunnel();
+  } catch (e) {
+    console.warn(`[Tailscale] stopFunnel warn: ${e.message}`);
+  }
+
+  if (force) {
+    try {
+      await forceKillTailscale();
+    } catch (e) {
+      console.warn(`[Tailscale] forceKill warn: ${e.message}`);
+    }
+  }
+
   await updateSettings({ tailscaleEnabled: false, tailscaleUrl: "" });
+
+  if (global.__tunnelStatusCache) {
+    global.__tunnelStatusCache.value = null;
+    global.__tunnelStatusCache.fetchedAt = 0;
+  }
+
   return { success: true };
 }
 
