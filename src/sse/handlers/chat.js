@@ -109,6 +109,7 @@ export async function handleChat(request, clientRawRequest = null) {
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
+    const visitedCombos = new Set([modelStr]);
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
@@ -127,7 +128,7 @@ export async function handleChat(request, clientRawRequest = null) {
             const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
             cleanRawReq = { ...clientRawRequest, body: cleanBody };
           }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, null, visitedCombos, 1);
         },
         log,
         comboName: modelStr,
@@ -143,7 +144,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, null, visitedCombos, 1),
         adapterAdded
       ),
       log,
@@ -190,13 +191,29 @@ export async function handleChat(request, clientRawRequest = null) {
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, requestedModel = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, requestedModel = null, visitedCombos = new Set(), depth = 0) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
   if (!modelInfo.provider) {
     const comboModels = await getComboModels(modelStr);
     if (comboModels) {
+      if (visitedCombos.has(modelStr)) {
+        log.warn("COMBO", `Circular combo reference detected: ${[...visitedCombos, modelStr].join(" -> ")}`);
+        return errorResponse(
+          HTTP_STATUS.BAD_REQUEST,
+          `Circular combo reference detected: ${[...visitedCombos, modelStr].join(" -> ")}`
+        );
+      }
+      if (depth >= 5) {
+        log.warn("COMBO", `Maximum combo nesting depth (5) exceeded: ${[...visitedCombos, modelStr].join(" -> ")}`);
+        return errorResponse(
+          HTTP_STATUS.BAD_REQUEST,
+          `Maximum combo nesting depth (5) exceeded: ${[...visitedCombos, modelStr].join(" -> ")}`
+        );
+      }
+      const nextVisited = new Set(visitedCombos).add(modelStr);
+      const nextDepth = depth + 1;
       const chatSettings = await getSettings();
       // Check for combo-specific strategy first, fallback to global
       const comboStrategies = chatSettings.comboStrategies || {};
@@ -220,7 +237,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
               const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
               cleanRawReq = { ...clientRawRequest, body: cleanBody };
             }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, null, nextVisited, nextDepth);
           },
           log,
           comboName: modelStr,
@@ -238,7 +255,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         body,
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, null, nextVisited, nextDepth),
           adapterAdded
         ),
         log,

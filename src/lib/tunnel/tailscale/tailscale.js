@@ -14,6 +14,7 @@ const IS_MAC = os.platform() === "darwin";
 const IS_LINUX = os.platform() === "linux";
 const IS_WINDOWS = os.platform() === "win32";
 const TAILSCALE_BIN = path.join(BIN_DIR, IS_WINDOWS ? "tailscale.exe" : "tailscale");
+const TAILSCALED_BIN = path.join(BIN_DIR, IS_WINDOWS ? "tailscaled.exe" : "tailscaled");
 
 // Custom socket for userspace-networking mode (no root required)
 const TAILSCALE_DIR = path.join(DATA_DIR, "tailscale");
@@ -26,6 +27,7 @@ const SYSTEM_SOCKET_FLAG = SYSTEM_TAILSCALE_SOCKET ? ["--socket", SYSTEM_TAILSCA
 
 // Well-known Windows install path
 const WINDOWS_TAILSCALE_BIN = "C:\\Program Files\\Tailscale\\tailscale.exe";
+const WINDOWS_TAILSCALED_BIN = "C:\\Program Files\\Tailscale\\tailscaled.exe";
 
 // Common Unix install paths to probe synchronously (system tailscale)
 const UNIX_TAILSCALE_CANDIDATES = [
@@ -34,6 +36,14 @@ const UNIX_TAILSCALE_CANDIDATES = [
   "/usr/sbin/tailscale",   // apt package on Debian/Ubuntu
   "/usr/bin/tailscale",
   "/snap/bin/tailscale",   // Snap package
+];
+
+const UNIX_TAILSCALED_CANDIDATES = [
+  "/usr/sbin/tailscaled",
+  "/usr/bin/tailscaled",
+  "/usr/local/bin/tailscaled",
+  "/opt/homebrew/bin/tailscaled",
+  "/snap/bin/tailscaled",
 ];
 
 // ─── Cache + background refresh (avoid blocking event loop on dead daemon) ──
@@ -81,6 +91,24 @@ export function getTailscaleBin() {
     } else binCache.value = null;
   }
   return binCache.value;
+}
+
+export function getTailscaledBin() {
+  if (fs.existsSync(TAILSCALED_BIN)) return TAILSCALED_BIN;
+  if (IS_WINDOWS && fs.existsSync(WINDOWS_TAILSCALED_BIN)) return WINDOWS_TAILSCALED_BIN;
+  if (!IS_WINDOWS) {
+    const found = UNIX_TAILSCALED_CANDIDATES.find((p) => fs.existsSync(p));
+    if (found) return found;
+    try {
+      const out = execSync(IS_WINDOWS ? "where tailscaled 2>nul" : "which tailscaled 2>/dev/null", {
+        windowsHide: true,
+        timeout: PROBE_TIMEOUT_MS,
+        env: { ...process.env, PATH: EXTENDED_PATH },
+      }).toString().trim();
+      if (out) return out;
+    } catch { /* ignore */ }
+  }
+  return null;
 }
 
 export function isTailscaleInstalled() {
@@ -571,6 +599,11 @@ export async function startDaemonWithPassword(sudoPassword) {
     } catch { /* unresponsive, restart below */ }
   }
 
+  const tailscaledBin = getTailscaledBin();
+  if (!tailscaledBin) {
+    throw new Error("Tailscale not installed");
+  }
+
   // Mode mismatch or unresponsive → kill all daemons on our socket
   try { execSync(`pkill -9 -f "tailscaled.*${TAILSCALE_SOCKET}"`, { stdio: "ignore", timeout: 3000 }); } catch { /* ignore */ }
   if (sudoPassword) {
@@ -583,7 +616,6 @@ export async function startDaemonWithPassword(sudoPassword) {
   // Reclaim folder ownership (previous root daemon may have locked it)
   await ensureUserOwnedDir(TAILSCALE_DIR);
 
-  const tailscaledBin = IS_MAC ? "/usr/local/bin/tailscaled" : "tailscaled";
   const daemonArgs = [
     `--socket=${TAILSCALE_SOCKET}`,
     `--statedir=${TAILSCALE_DIR}`,
@@ -598,6 +630,9 @@ export async function startDaemonWithPassword(sudoPassword) {
       cwd: os.tmpdir(),
       env: { ...process.env, PATH: EXTENDED_PATH },
     });
+    child.on("error", (err) => {
+      console.error(`[Tailscale] daemon spawn error: ${err.message}`);
+    });
     child.stdin.write(`${sudoPassword}\n`);
     child.stdin.end();
     child.unref();
@@ -607,6 +642,9 @@ export async function startDaemonWithPassword(sudoPassword) {
       stdio: "ignore",
       cwd: os.tmpdir(),
       env: { ...process.env, PATH: EXTENDED_PATH },
+    });
+    child.on("error", (err) => {
+      console.error(`[Tailscale] daemon spawn error: ${err.message}`);
     });
     child.unref();
   }

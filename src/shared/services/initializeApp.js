@@ -8,7 +8,7 @@ import {
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
   getTunnelService, getTailscaleService, setTunnelUnexpectedExitCallback,
   killCloudflared, isCloudflaredRunning, ensureCloudflared,
-  isTailscaleRunning, isTailscaleRunningStrict, isDaemonAlive, startFunnel,
+  isTailscaleInstalled, isTailscaleRunning, isTailscaleRunningStrict, isDaemonAlive, startFunnel,
   checkInternet,
   RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
   WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS, VIRTUAL_IFACE_REGEX,
@@ -93,8 +93,13 @@ async function runHeavyStartup() {
   // Auto-resume tailscale (once per process)
   if (settings.tailscaleEnabled && !g.tailscaleAutoResumed) {
     g.tailscaleAutoResumed = true;
-    console.log("[InitApp] Tailscale was enabled, auto-resuming...");
-    safeRestartTailscale("startup").catch((e) => console.log("[InitApp] Tailscale resume failed:", e.message));
+    if (!isTailscaleInstalled()) {
+      console.warn("[InitApp] Tailscale was enabled in settings, but is not installed. Disabling auto-resume.");
+      updateSettings({ tailscaleEnabled: false, tailscaleUrl: "" }).catch(() => {});
+    } else {
+      console.log("[InitApp] Tailscale was enabled, auto-resuming...");
+      safeRestartTailscale("startup").catch((e) => console.log("[InitApp] Tailscale resume failed:", e.message));
+    }
   }
 
   if (settings.tunnelEnabled) ensureCloudflared().catch(() => {});
@@ -206,6 +211,11 @@ async function safeRestartTailscale(reason) {
   if (svc.cancelToken.cancelled) return;
   if (svc.spawnInProgress) return;
 
+  if (!isTailscaleInstalled()) {
+    console.warn(`[Tailscale] safeRestart (${reason}) skipped — Tailscale is not installed`);
+    return;
+  }
+
   // Tailscale daemon is OS-level with built-in reconnect; trust it when running (even on netchange).
   // Startup uses strict probe — cached state is cold after process/dev reload.
   const running = reason === "startup" ? await isTailscaleRunningStrict() : isTailscaleRunning();
@@ -237,6 +247,9 @@ async function safeRestartTailscale(reason) {
     console.log("[Tailscale] restart success");
   } catch (err) {
     console.log("[Tailscale] restart failed:", err.message);
+    if (/not installed/i.test(err.message)) {
+      await updateSettings({ tailscaleEnabled: false, tailscaleUrl: "" }).catch(() => {});
+    }
   }
 }
 

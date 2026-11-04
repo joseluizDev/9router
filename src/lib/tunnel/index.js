@@ -34,6 +34,7 @@ export {
   isDaemonAlive,
   startFunnel,
   getTailscaleBin,
+  getTailscaledBin,
   installTailscale,
   startLogin,
   startDaemonWithPassword,

@@ -363,6 +363,14 @@ export async function handleComboChat({
   confidenceThreshold = 0.8,
   resolveSmartChoice = null,
 }) {
+  const sanitizedModels = (Array.isArray(models) ? models : []).filter((m) => m && m !== comboName);
+  if (sanitizedModels.length === 0) {
+    return new Response(
+      JSON.stringify({ error: { message: `Combo "${comboName}" has no valid models` } }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  models = sanitizedModels;
   let rotatedModels = models;
   let activeStickyModel = null;
 

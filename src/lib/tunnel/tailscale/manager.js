@@ -1,5 +1,5 @@
 import { loadState, generateShortId } from "../shared/state.js";
-import { startFunnel, stopFunnel, isTailscaleRunning, isTailscaleRunningStrict, isTailscaleLoggedIn, isTailscaleLoggedInStrict, startLogin, startDaemonWithPassword, provisionCert } from "./tailscale.js";
+import { startFunnel, stopFunnel, isTailscaleRunning, isTailscaleRunningStrict, isTailscaleLoggedIn, isTailscaleLoggedInStrict, startLogin, startDaemonWithPassword, provisionCert, isTailscaleInstalled } from "./tailscale.js";
 import { waitForHealth } from "./healthCheck.js";
 import { HEALTH_CHECK } from "./config.js";
 import { getSettings, updateSettings } from "@/lib/localDb";
@@ -29,6 +29,9 @@ export async function enableTailscale(localPort = 20128) {
   const token = svc.cancelToken;
 
   try {
+    if (!isTailscaleInstalled()) {
+      throw new Error("Tailscale not installed");
+    }
     const sudoPass = getCachedPassword() || await loadEncryptedPassword() || "";
     await startDaemonWithPassword(sudoPass);
     console.log("[Tailscale] daemon ready");
