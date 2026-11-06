@@ -272,8 +272,11 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 }
 
 /**
- * Mark account+model as unavailable — locks modelLock_${model} in DB.
- * All errors (429, 401, 5xx, etc.) lock per model, not per account.
+ * Mark an account unavailable in the DB.
+ * Most errors (429, 5xx, request-scoped 4xx) lock per model (`modelLock_${model}`)
+ * so a single model's failure does not bench an otherwise healthy account.
+ * Account-wide failures (rejected credential, GitHub monthly quota) lock
+ * `modelLock___all` instead — see `accountWide` in errorConfig ERROR_RULES.
  * @param {string} connectionId
  * @param {number} status - HTTP status code from upstream
  * @param {string} errorText
