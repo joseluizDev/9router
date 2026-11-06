@@ -41,6 +41,11 @@ export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 // Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
 
+// Cooldown for an account whose credential itself was rejected (blocked/disabled/revoked).
+// Longer than COOLDOWN.long: a dead OAuth token does not heal in 2 minutes, and each
+// re-probe costs a full failed round-trip in front of the real account.
+export const AUTH_INVALID_COOLDOWN_MS = 30 * 60 * 1000;
+
 // Cooldown durations (ms)
 const COOLDOWN = {
   long: 2 * 60 * 1000,
@@ -50,11 +55,14 @@ const COOLDOWN = {
 /**
  * Unified error classification rules.
  * Checked top-to-bottom: text rules first (by order), then status rules.
- * Each rule: { text?, status?, cooldownMs?, backoff? }
+ * Each rule: { text?, status?, cooldownMs?, backoff?, accountWide? }
  *   - text: substring match (case-insensitive) on error message
  *   - status: HTTP status code match
  *   - cooldownMs: fixed cooldown duration
  *   - backoff: true = use exponential backoff (rate limit)
+ *   - accountWide: true = the failure belongs to the credential, not to one model,
+ *     so the cooldown must lock the whole account (`modelLock___all`) instead of
+ *     re-probing it once per model on every cooldown window
  */
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
@@ -74,7 +82,11 @@ export const ERROR_RULES = [
   { text: "overloaded",               backoff: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
-  { status: 401, cooldownMs: COOLDOWN.long },
+  // A bare 403 from Antigravity means the Google account itself was rejected (blocked,
+  // disabled, revoked), not a transient request problem. Quota/rate-limit wording is
+  // caught by the text rules above and keeps its model-scoped backoff.
+  { provider: "antigravity", status: 403, cooldownMs: AUTH_INVALID_COOLDOWN_MS, accountWide: true },
+  { status: 401, cooldownMs: COOLDOWN.long, accountWide: true },
   { status: 402, cooldownMs: COOLDOWN.long },
   { status: 403, cooldownMs: COOLDOWN.long },
   { status: 404, cooldownMs: COOLDOWN.long },

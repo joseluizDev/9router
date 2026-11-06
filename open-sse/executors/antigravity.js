@@ -1,13 +1,13 @@
 import crypto from "crypto";
-import { BaseExecutor } from "./base.js";
-import { PROVIDERS } from "../config/providers.js";
-import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
-import { HTTP_STATUS } from "../config/runtimeConfig.js";
-import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_HEADERS, ANTIGRAVITY_PROMPT_REWRITES, OAUTH_ENDPOINTS } from "../config/appConstants.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { PROVIDERS } from "../config/providers.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
+import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
+import { BaseExecutor } from "./base.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -452,6 +452,20 @@ export class AntigravityExecutor extends BaseExecutor {
     if (status === HTTP_STATUS.RATE_LIMITED) return true;
     if (ANTIGRAVITY_TRANSIENT_STATUSES.has(status)) return true;
     return ANTIGRAVITY_TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(message || ""));
+  }
+
+  /**
+   * Hook called by BaseExecutor.tryRetry before an in-place retry.
+   * With more than one healthy connection a 429 means "this account is hot", not
+   * "wait here": sleeping 2s+4s+8s and re-running the whole generation against the
+   * same throttled account is strictly worse than letting the chat handler rotate
+   * to the next account. Keep in-place retry only when the pool cannot rotate.
+   */
+  shouldRetryInPlace(status, credentials) {
+    if (status === HTTP_STATUS.RATE_LIMITED) {
+      return (credentials?._poolSize ?? 1) <= 1;
+    }
+    return true;
   }
 
   // Hook called by BaseExecutor.tryRetry: derive delay from Retry-After (header → body),

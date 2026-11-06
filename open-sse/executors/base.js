@@ -1,9 +1,9 @@
-import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import { DEFAULT_RETRY_CONFIG, FETCH_CONNECT_TIMEOUT_MS, HTTP_STATUS, resolveRetryEntry } from "../config/runtimeConfig.js";
+import { ANTHROPIC_API_VERSION, ANTHROPIC_COMPAT_BASE, OPENAI_COMPAT_BASE } from "../providers/shared.js";
 import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { dbg } from "../utils/debugLog.js";
-import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { dbg } from "../utils/debugLog.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -111,6 +111,14 @@ export class BaseExecutor {
     const tryRetry = async (urlIndex, statusKey, reason, response = null) => {
       const { attempts, delayMs } = resolveRetryEntry(retryConfig[statusKey]);
       if (attempts <= 0 || retryAttemptsByUrl[urlIndex] >= attempts) return false;
+      // Hook: subclass may veto in-place retry entirely. A provider with a multi-account
+      // pool prefers rotating to the next account over sleeping on a throttled one
+      // (see antigravity.shouldRetryInPlace) — same wall-clock worst case, one fewer
+      // wasted generation against an account that just said "no".
+      if (this.shouldRetryInPlace && this.shouldRetryInPlace(statusKey, credentials) === false) {
+        log?.debug?.("RETRY", `${reason} — in-place retry skipped, provider rotates accounts`);
+        return false;
+      }
       // Hook: subclass may derive delay from the response (headers/body). null → skip retry, use fallback.
       let waitMs = delayMs;
       if (response && this.computeRetryDelay) {

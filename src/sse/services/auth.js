@@ -261,7 +261,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       testStatus: connection.testStatus,
       lastError: connection.lastError,
       // Pass full connection for clearAccountError to read modelLock_* keys
-      _connection: connection
+      _connection: connection,
+      // How many connections could serve this request (including the picked one).
+      // Executors use it to choose between retrying in place and rotating accounts.
+      _poolSize: availableConnections.length
     };
   } finally {
     if (resolveMutex) resolveMutex();
@@ -288,7 +291,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   const githubResetAtMs = githubMonthlyResetMs(status, errorText, provider);
 
   // Provider-specific precise cooldown (e.g. codex usage_limit_reached resets_at) overrides backoff
-  let shouldFallback, cooldownMs, newBackoffLevel;
+  let shouldFallback, cooldownMs, newBackoffLevel, accountWide = false;
   if (githubResetAtMs) {
     shouldFallback = true;
     cooldownMs = githubResetAtMs - Date.now();
@@ -301,13 +304,16 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, resolveProviderId(provider)));
+    ({ shouldFallback, cooldownMs, newBackoffLevel, accountWide = false } = checkFallbackError(status, errorText, backoffLevel, resolveProviderId(provider)));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
   const validationInfo = extractGoogleValidationInfo(errorText);
   const reason = validationInfo.message || (typeof errorText === "string" ? errorText.slice(0, 200) : "Provider error");
-  const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
+  // Account-wide failures (rejected credential, GH monthly quota) must lock modelLock___all:
+  // a dead token does not heal per model, and a model-scoped lock re-probes the same
+  // dead account once per model on every cooldown window.
+  const lockUpdate = buildModelLockUpdate(githubResetAtMs || accountWide ? null : model, cooldownMs);
 
   const updateFields = {
     ...lockUpdate,
