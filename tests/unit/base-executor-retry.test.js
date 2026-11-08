@@ -1,5 +1,5 @@
 // Locks BaseExecutor.execute retry/fallback behavior (docs 04 GAP #1, docs 11 §7).
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the network layer so we can script upstream responses.
 const fetchMock = vi.fn();
@@ -8,6 +8,7 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 }));
 
 const { BaseExecutor } = await import("../../open-sse/executors/base.js");
+const { AntigravityExecutor } = await import("../../open-sse/executors/antigravity.js");
 
 function res(status) {
   return { status, headers: { get: () => "" } };
@@ -81,6 +82,56 @@ describe("BaseExecutor.execute — network error retry/fallback", () => {
     }
     expect(thrown?.message).toBe("boom");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("BaseExecutor.execute — shouldRetryInPlace hook (account rotation)", () => {
+  // Stub only the transport shaping: execute/tryRetry/shouldRetryInPlace stay real.
+  function makeAntigravity(retry) {
+    const ex = new AntigravityExecutor();
+    ex.config = { ...ex.config, retry };
+    ex.buildUrl = () => "https://ag.test/v1";
+    ex.buildHeaders = () => ({ "Content-Type": "application/json" });
+    ex.transformRequest = (_model, body) => body;
+    return ex;
+  }
+
+  it("does not sleep-and-retry a 429 when the pool has other accounts", async () => {
+    const ex = makeAntigravity({ 429: { attempts: 3, delayMs: 0 } });
+    fetchMock.mockResolvedValueOnce(res(429));
+
+    const out = await ex.execute({
+      model: "m",
+      body: {},
+      stream: false,
+      credentials: { ...creds, _poolSize: 20 },
+    });
+
+    // One attempt, then the response goes back to chat.js which rotates accounts.
+    expect(out.response.status).toBe(429);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still retries a 429 in place when the pool cannot rotate", async () => {
+    vi.useFakeTimers();
+    try {
+      const ex = makeAntigravity({ 429: { attempts: 2, delayMs: 0 } });
+      fetchMock.mockResolvedValueOnce(res(429)).mockResolvedValueOnce(res(200));
+
+      const pending = ex.execute({
+        model: "m",
+        body: {},
+        stream: false,
+        credentials: { ...creds, _poolSize: 1 },
+      });
+      await vi.advanceTimersByTimeAsync(30000);
+      const out = await pending;
+
+      expect(out.response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

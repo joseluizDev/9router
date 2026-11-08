@@ -4,6 +4,7 @@
 // the first error. A 400 "maximum context length" from one session therefore
 // looked like the same failure in unrelated sessions.
 import { describe, expect, it } from "vitest";
+import { AUTH_INVALID_COOLDOWN_MS } from "../../open-sse/config/errorConfig.js";
 import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
 
 describe("checkFallbackError — request-scoped vs account-scoped failures", () => {
@@ -55,5 +56,47 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
 
     expect(result.shouldFallback).toBe(true);
     expect(result.cooldownMs).toBeGreaterThan(0);
+  });
+});
+
+describe("checkFallbackError — account-wide cooldown (lock target)", () => {
+  it("treats a bare Antigravity 403 as an account-wide rejection", () => {
+    // A 403 from Google means the account itself was blocked/disabled/revoked.
+    // Model-scoped locking made the dead account come back once per model on
+    // every 2-minute window, ahead of healthy accounts under fill-first.
+    expect(checkFallbackError(403, "HTTP 403", 0, "antigravity")).toEqual({
+      shouldFallback: true,
+      cooldownMs: AUTH_INVALID_COOLDOWN_MS,
+      accountWide: true,
+    });
+  });
+
+  it("keeps an Antigravity 403 with quota wording model-scoped", () => {
+    // Text rules win over the status rule: this is throttling, not a dead account.
+    const result = checkFallbackError(403, "quota exceeded for this model", 0, "antigravity");
+
+    expect(result.accountWide).toBeUndefined();
+    expect(result.newBackoffLevel).toBe(1);
+  });
+
+  it("keeps a generic 403 model-scoped", () => {
+    // For other providers a 403 can simply mean "this model is not in the plan",
+    // so the account must stay usable for its other models.
+    expect(checkFallbackError(403, "HTTP 403", 0, "openai")).toEqual({
+      shouldFallback: true,
+      cooldownMs: 2 * 60 * 1000,
+    });
+  });
+
+  it("treats a 401 as account-wide for every provider", () => {
+    for (const provider of ["antigravity", "openai", null]) {
+      const result = checkFallbackError(401, "unauthorized", 0, provider);
+
+      expect(result).toEqual({ shouldFallback: true, cooldownMs: 2 * 60 * 1000, accountWide: true });
+    }
+  });
+
+  it("does not mark rate limits account-wide", () => {
+    expect(checkFallbackError(429, "too many requests", 0, "antigravity").accountWide).toBeUndefined();
   });
 });

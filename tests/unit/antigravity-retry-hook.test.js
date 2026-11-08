@@ -1,5 +1,5 @@
 // Guards D3: antigravity 429/503 retry merged into base via computeRetryDelay hook.
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
 import antigravity from "../../open-sse/providers/registry/antigravity.js";
 
@@ -50,6 +50,26 @@ describe("antigravity computeRetryDelay hook (D3)", () => {
   it("does not retry non-transient 400 errors", async () => {
     const r = res(400, {}, { error: { message: "Invalid request" } });
     expect(await ag.computeRetryDelay(r, 1)).toBe(false);
+  });
+
+  it("rotates accounts on 429 instead of retrying in place when the pool has alternatives", () => {
+    // 20 healthy accounts: sleeping 2s+4s+8s on a throttled account is worse than
+    // letting chat.js pick the next one.
+    expect(ag.shouldRetryInPlace(429, { _poolSize: 20 })).toBe(false);
+    expect(ag.shouldRetryInPlace(429, { _poolSize: 2 })).toBe(false);
+  });
+
+  it("keeps the in-place retry when the pool cannot rotate", () => {
+    expect(ag.shouldRetryInPlace(429, { _poolSize: 1 })).toBe(true);
+    // No pool info at all (executor used standalone) must not change behaviour.
+    expect(ag.shouldRetryInPlace(429, {})).toBe(true);
+    expect(ag.shouldRetryInPlace(429, undefined)).toBe(true);
+  });
+
+  it("still retries 503/500 in place regardless of pool size", () => {
+    for (const status of [500, 502, 503, 504]) {
+      expect(ag.shouldRetryInPlace(status, { _poolSize: 20 })).toBe(true);
+    }
   });
 
   it("deduplicates sanitized tool names", () => {
