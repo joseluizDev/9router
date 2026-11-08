@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mockUndiciFetch } from "../helpers/mockFetch.js";
 
 const originalFetch = global.fetch;
 const TEST_CLIENT_ID = "00000000-0000-4000-8000-000000000000";
@@ -34,6 +35,7 @@ describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
       }),
     });
     global.fetch = fetchMock;
+    mockUndiciFetch(fetchMock);
 
     const { refreshKiroToken } = await import("../../open-sse/services/tokenRefresh.js");
     const result = await refreshKiroToken("old-refresh-token", {

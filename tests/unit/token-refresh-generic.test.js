@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mockUndiciFetch } from "../helpers/mockFetch.js";
 
 const originalFetch = global.fetch;
 
@@ -18,7 +19,7 @@ function mockFetchOnce(payload, { ok = true, status = 200 } = {}) {
     text: () => Promise.resolve(JSON.stringify(payload)),
   });
   global.fetch = fn;
-  return fn;
+  return mockUndiciFetch(fn);
 }
 
 describe("refreshAccessToken — config-driven profiles", () => {

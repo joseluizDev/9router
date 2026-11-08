@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mockUndiciFetch } from "../helpers/mockFetch.js";
 
 const originalFetch = global.fetch;
 
@@ -28,6 +29,7 @@ describe("Codex Refresh Token", () => {
       json: () => Promise.resolve(payload),
     });
     global.fetch = fetchMock;
+    mockUndiciFetch(fetchMock);
     return fetchMock;
   }
 

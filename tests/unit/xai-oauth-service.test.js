@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockUndiciFetch } from "../helpers/mockFetch.js";
 
 describe("xai/oauth service", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
     vi.stubGlobal("fetch", vi.fn());
+    mockUndiciFetch(globalThis.fetch);
   });
 
   it("validates discovered endpoints are https x.ai URLs", async () => {
