@@ -1,5 +1,5 @@
 // Re-export from open-sse with localDb integration
-import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb";
+import { getModelAliases, getComboByName, getProviderNodes, getProviderConnections } from "@/lib/localDb";
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
 
@@ -70,7 +70,16 @@ export async function getModelInfo(modelStr) {
     };
   }
 
-  return getModelInfoCore(modelStr, getModelAliases);
+  // Check if this is a combo name before resolving as alias
+  // This prevents combo names from being incorrectly routed to providers
+  const combo = await getComboByName(parsed.model);
+  if (combo) {
+    // Return null provider to signal this should be handled as combo
+    // The caller (handleChat) will detect this and handle it as combo
+    return { provider: null, model: parsed.model };
+  }
+
+  return fallbackToClaudeOAuth(await getModelInfoCore(modelStr, getModelAliases));
 }
 
 /**
@@ -83,4 +92,17 @@ export async function getComboModels(modelStr) {
     return combo.models;
   }
   return null;
+}
+
+// A bare `claude-*` id infers provider "anthropic" (API key). When no anthropic
+// connection is active but a Claude OAuth connection is, use "claude" instead of
+// failing with "No active credentials for provider: anthropic" (same idea as the
+// Codex-only gpt-* rules in open-sse/services/model.js).
+async function fallbackToClaudeOAuth(info) {
+  if (info?.provider !== "anthropic") return info;
+  const hasActive = async (provider) =>
+    (await getProviderConnections({ provider, isActive: true })).length > 0;
+  if (await hasActive("anthropic")) return info;
+  if (!(await hasActive("claude"))) return info;
+  return { ...info, provider: "claude" };
 }
