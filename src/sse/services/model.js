@@ -70,15 +70,6 @@ export async function getModelInfo(modelStr) {
     };
   }
 
-  // Check if this is a combo name before resolving as alias
-  // This prevents combo names from being incorrectly routed to providers
-  const combo = await getComboByName(parsed.model);
-  if (combo) {
-    // Return null provider to signal this should be handled as combo
-    // The caller (handleChat) will detect this and handle it as combo
-    return { provider: null, model: parsed.model };
-  }
-
   return fallbackToClaudeOAuth(await getModelInfoCore(modelStr, getModelAliases));
 }
 
