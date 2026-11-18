@@ -56,6 +56,7 @@ export default {
     { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", supportedFormats: ["openai"] },
     { id: "gemini-3-flash", name: "Gemini 3 Flash", supportedFormats: ["openai"] },
     // GPT / Grok / Muse Spark paid (responses)
+    { id: "gpt-6.2-astra", name: "GPT 6.2 Astra", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },
     { id: "gpt-6-astra", name: "GPT 6 Astra", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },
     { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },
     { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },

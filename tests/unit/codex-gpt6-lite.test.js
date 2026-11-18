@@ -11,7 +11,7 @@ const credentials = { connectionId: "fixture", accessToken: "fixture-token" };
 afterEach(() => vi.restoreAllMocks());
 
 describe("Codex GPT-6 Sol/Luna transport", () => {
-  it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])("lists %s with Codex capabilities", (model) => {
+  it.each(["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])("lists %s with Codex capabilities", (model) => {
     const entry = getModelsByProviderId("codex").find((item) => item.id === model);
     expect(entry?.responsesLite).toBe(true);
     expect(entry?.thinkingLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
@@ -55,6 +55,7 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
 
   it("uses official OpenAI Standard pricing for GPT-6", () => {
     expect(getPricingForModel("codex", "gpt-6-astra")).toMatchObject({ input: 10, cached: 1, cache_creation: 12.5, output: 50 });
+    expect(getPricingForModel("codex", "gpt-6.2-astra")).toMatchObject({ input: 10, cached: 1, cache_creation: 12.5, output: 50 });
     expect(getPricingForModel("codex", "gpt-6-sol")).toMatchObject({ input: 2, cached: 0.2, cache_creation: 2.5, output: 10 });
     expect(getPricingForModel("codex", "gpt-6-luna")).toMatchObject({ input: 0.1, cached: 0.01, cache_creation: 0.125, output: 0.5 });
   });
@@ -201,9 +202,9 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     expect(body.reasoning.context).toBe("all_turns");
   });
 
-  it("maps GPT-6.1 Sol's Codex-only ultra effort to max", () => {
-    const body = new CodexExecutor().transformRequest("gpt-6.1-sol", {
-      model: "gpt-6.1-sol", input: "hello", reasoning: { effort: "ultra" },
+  it.each(["gpt-6.2-sol", "gpt-6.1-sol"])("maps %s's Codex-only ultra effort to max", (model) => {
+    const body = new CodexExecutor().transformRequest(model, {
+      model, input: "hello", reasoning: { effort: "ultra" },
     }, true, credentials);
 
     expect(body.reasoning).toEqual({ effort: "max", context: "all_turns" });

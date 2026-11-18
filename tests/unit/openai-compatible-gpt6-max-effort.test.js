@@ -7,7 +7,7 @@ import { FORMATS } from "../../open-sse/translator/formats.js";
 // The codex provider already keeps it; an OpenAI Compatible node pointing at the
 // same models silently clamped it to "xhigh".
 const NODE = "openai-compatible-chat-test";
-const MAX_MODELS = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+const MAX_MODELS = ["gpt-6-astra", "gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
 describe("OpenAI Compatible node keeps effort max for GPT-5.6 / GPT-6 (#5186)", () => {
   it.each(MAX_MODELS)("%s: max reaches the wire as max (chat)", (model) => {

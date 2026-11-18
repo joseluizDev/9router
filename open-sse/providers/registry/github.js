@@ -55,9 +55,11 @@ export default {
     { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
     { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
     { id: "gpt-6-astra", name: "GPT-6 Astra" },
+    { id: "gpt-6.2-astra", name: "GPT-6.2 Astra" },
     { id: "gpt-6-luna", name: "GPT-6 Luna" },
     { id: "gpt-6-sol", name: "GPT-6 Sol" },
     { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+    { id: "gpt-6.2-sol", name: "GPT-6.2 Sol" },
     // Note: routing to Copilot's Anthropic-native /v1/messages shim (see
     // executors/github.js) is decided by model-NAME pattern at request time, not by
     // a static targetFormat field here — Copilot's live model catalog (see

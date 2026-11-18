@@ -404,7 +404,7 @@ amp --model "{{model}}"
     defaultModels: [
       { id: "claude-opus-5", name: "Claude Opus 5", alias: "opus", defaultValue: "cc/claude-opus-5" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "sonnet", defaultValue: "cc/claude-sonnet-4-6" },
-      { id: "gpt-6.1-sol", name: "GPT 6.1 Sol", alias: "gpt6", defaultValue: "cx/gpt-6.1-sol" },
+      { id: "gpt-6.2-sol", name: "GPT 6.2 Sol", alias: "gpt6", defaultValue: "cx/gpt-6.2-sol" },
       { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", alias: "gemini", defaultValue: "gemini/gemini-3.1-pro" },
     ],
   },
