@@ -155,10 +155,13 @@ export function createSSEStream(options = {}) {
       buffer += text;
       reqLogger?.appendProviderChunk?.(text);
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
+      // indexOf scan instead of split: no per-chunk array allocation. `start` advances
+      // before the body so the existing `continue`s stay safe; buffer isn't touched inside.
+      let start = 0;
+      let nl;
+      while ((nl = buffer.indexOf("\n", start)) !== -1) {
+        const line = buffer.slice(start, nl);
+        start = nl + 1;
         const trimmed = line.trim();
         if (isDebugEnabled && trimmed) {
           sseLineCount++;
@@ -469,6 +472,7 @@ export function createSSEStream(options = {}) {
           }, PENDING_COMPLETION_FLUSH_MS);
         }
       }
+      buffer = buffer.slice(start);
     },
 
     flush(controller) {
